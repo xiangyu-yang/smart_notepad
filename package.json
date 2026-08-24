@@ -1,0 +1,62 @@
+{
+  "name": "smart-notepad",
+  "version": "0.1.0",
+  "description": "本地化超级记事本 - Electron 桌面应用",
+  "main": "dist-electron/main/index.js",
+  "private": true,
+  "author": "Smart Notepad",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "build:mac": "electron-vite build && electron-builder --mac",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "preview": "electron-vite preview"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^9.0.1",
+    "react-router-dom": "^6.26.2",
+    "remark-gfm": "^4.0.0",
+    "zustand": "^4.5.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/typography": "^0.5.15",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^22.5.5",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "electron": "^32.1.0",
+    "electron-builder": "^25.0.5",
+    "electron-vite": "^2.3.0",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.11",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.5"
+  },
+  "build": {
+    "appId": "com.smartnotepad.app",
+    "productName": "SmartNotepad",
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "directories": {
+      "output": "release/${version}"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": ["nsis"]
+    },
+    "files": [
+      "dist-electron",
+      "dist"
+    ]
+  }
+}

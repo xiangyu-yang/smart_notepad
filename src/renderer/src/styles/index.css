@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========== 全局基础样式 ========== */
+:root {
+  color-scheme: light;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", Inter, system-ui, sans-serif;
+  color: #2B2A27;
+  background: #FBF9F5;
+}
+
+/* ========== 自定义滚动条 ========== */
+.thin-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(132, 128, 118, 0.25);
+  border-radius: 8px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(132, 128, 118, 0.45);
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* ========== UI 基础原子类 ========== */
+.gradient-border {
+  position: relative;
+  isolation: isolate;
+}
+.gradient-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(127, 169, 144, 0.35), rgba(201, 192, 227, 0.35), rgba(245, 201, 169, 0.3));
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 220ms ease;
+  z-index: -1;
+}
+.gradient-border:hover::before {
+  opacity: 1;
+}
+
+/* Markdown 排版柔和化 */
+.prose-note {
+  color: #3A3832;
+  line-height: 1.75;
+}
+.prose-note h1, .prose-note h2, .prose-note h3 {
+  color: #2B2A27;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.prose-note code {
+  background: #F1ECE0;
+  padding: 2px 6px;
+  border-radius: 6px;
+  font-size: 0.9em;
+}
+.prose-note pre {
+  background: #2B2A27;
+  color: #F6F2E9;
+  border-radius: 10px;
+  padding: 14px 16px;
+  overflow-x: auto;
+}
+.prose-note pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+.prose-note a {
+  color: #5E8B72;
+}
+.prose-note blockquote {
+  border-left: 3px solid #DFD3B8;
+  padding-left: 14px;
+  color: #53514A;
+  margin-left: 0;
+}
+
+/* textarea 细节 */
+textarea.editor-textarea {
+  field-sizing: content;
+}
+
+/* 正文编辑区：空内容时让 placeholder 显示在顶部居中，灰色字体。
+   浏览器会把 placeholder::text-align 仅作用于"尚未输入文字时"的
+   提示字，不影响真实文本的对齐方式（仍然左对齐）。 */
+textarea.editor-textarea::placeholder {
+  text-align: center;
+  color: #B8B5AC; /* text-ink-400 级灰色，略浅于正文 */
+  font-weight: 400;
+  letter-spacing: 0.2px;
+}
+textarea.editor-textarea::-webkit-input-placeholder {
+  text-align: center;
+  color: #B8B5AC;
+}
+textarea.editor-textarea::-moz-placeholder {
+  text-align: center;
+  color: #B8B5AC;
+  opacity: 1;
+}
+/* 预览视图空正文也用顶部居中灰字 */
+.preview-empty-hint {
+  text-align: center;
+  color: #B8B5AC;
+}
+
+.drag-region {
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
