@@ -21,12 +21,24 @@ export interface ConfirmOptions {
 
 export type ConfirmResult = boolean | 'save' | 'discard' | 'cancel';
 
+export interface PromptOptions {
+  title: string;
+  description?: string;
+  placeholder?: string;
+  defaultValue?: string;
+  confirmText?: string;
+  cancelText?: string;
+}
+
 interface UiState {
   sidebarSearch: string;
   showAiPanel: boolean;
   toastList: Toast[];
   confirmOptions: ConfirmOptions | null;
   confirmResolver: ((value: ConfirmResult) => void) | null;
+  /** 文本输入对话框状态（替代 Electron 不支持的 window.prompt） */
+  promptOptions: PromptOptions | null;
+  promptResolver: ((value: string | null) => void) | null;
   /** 大模型思考过程开关：开 → 实时输出 reasoning；关 → 跳过思考直接出答案 */
   reasoningEnabled: boolean;
   /** AI 面板宽度（px），可拖动调整 */
@@ -46,6 +58,9 @@ interface UiState {
     options: ConfirmOptions
   ) => Promise<ConfirmResult>;
   closeConfirm: (result: ConfirmResult) => void;
+
+  openPrompt: (options: PromptOptions) => Promise<string | null>;
+  closePrompt: (value: string | null) => void;
 }
 
 let toastSeq = 0;
@@ -56,6 +71,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   toastList: [],
   confirmOptions: null,
   confirmResolver: null,
+  promptOptions: null,
+  promptResolver: null,
   reasoningEnabled: true, // 默认开启思考过程，让用户能看见模型"在想什么"
   aiPanelWidth: 380, // AI 面板默认宽度
 
@@ -93,5 +110,22 @@ export const useUiStore = create<UiState>((set, get) => ({
       confirmResolver: null
     });
     if (resolver) resolver(result);
+  },
+
+  openPrompt: (options) => {
+    return new Promise<string | null>((resolve) => {
+      set({
+        promptOptions: options,
+        promptResolver: resolve
+      });
+    });
+  },
+  closePrompt: (value) => {
+    const resolver = get().promptResolver;
+    set({
+      promptOptions: null,
+      promptResolver: null
+    });
+    if (resolver) resolver(value);
   }
 }));

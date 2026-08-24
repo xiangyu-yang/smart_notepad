@@ -21,7 +21,14 @@ export const IPC_CHANNELS = {
   CHAT_LIST_SESSIONS: 'chat.listSessions',
   CHAT_UPSERT_SESSION: 'chat.upsertSession',
   CHAT_DELETE_SESSION: 'chat.deleteSession',
-  CHAT_REPLACE_ALL_FOR_NOTE: 'chat.replaceAllForNote'
+  CHAT_REPLACE_ALL_FOR_NOTE: 'chat.replaceAllForNote',
+  // Folders (filesystem-style note management)
+  FOLDERS_LIST: 'folders.list',
+  FOLDERS_CREATE: 'folders.create',
+  FOLDERS_RENAME: 'folders.rename',
+  FOLDERS_DELETE: 'folders.delete',
+  // Move a note into a folder (folder_id null = root)
+  NOTES_MOVE: 'notes.move'
 } as const;
 
 export const DB_FILE = 'smart_notepad.db';

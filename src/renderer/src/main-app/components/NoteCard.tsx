@@ -10,6 +10,8 @@ import { summarize, stripMarkdown } from '../utils/text';
 
 interface NoteCardProps {
   note: Note;
+  /** 树形层级缩进（文件夹内嵌套时 >0）；默认 0 */
+  depth?: number;
 }
 
 function highlight(text: string, kw: string) {
@@ -27,7 +29,7 @@ function highlight(text: string, kw: string) {
   );
 }
 
-export default function NoteCard({ note }: NoteCardProps) {
+export default function NoteCard({ note, depth = 0 }: NoteCardProps) {
   const navigate = useNavigate();
   const navigateIfSafe = useNavigateSafe();
   const currentId = useNoteStore((s) => s.currentId);
@@ -37,6 +39,12 @@ export default function NoteCard({ note }: NoteCardProps) {
   const toast = useToast();
 
   const isActive = currentId === note.id;
+
+  // 拖拽源：把记事拖入文件夹或拖到空白处移回根目录
+  const onDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData('application/x-note-id', note.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
 
   const handleClick = () => {
     useNoteStore.getState().setCurrentId(note.id);
@@ -76,12 +84,16 @@ export default function NoteCard({ note }: NoteCardProps) {
 
   return (
     <div
+      draggable
+      onDragStart={onDragStart}
       onClick={handleClick}
+      style={{ marginLeft: depth * 16 }}
       className={[
         'relative group cursor-pointer rounded-xl2 p-4',
         'transition-all duration-150 ease-out',
         'gradient-border shadow-card bg-paper-50',
         'hover:shadow-cardHover hover:-translate-y-0.5',
+        'active:cursor-grabbing',
         isActive
           ? 'bg-paper-100 ring-2 ring-sage-500/70 shadow-cardHover'
           : ''

@@ -6,6 +6,17 @@ export interface Note {
   content: string;
   created_at: number;
   updated_at: number;
+  /** 所属文件夹 id；null/undefined 表示根目录（向后兼容老数据） */
+  folder_id?: string | null;
+}
+
+export interface Folder {
+  id: string;
+  name: string;
+  /** 父文件夹 id；null 表示根级 */
+  parent_id: string | null;
+  created_at: number;
+  updated_at: number;
 }
 
 export interface SettingsMap {
@@ -42,6 +53,12 @@ export interface IpcApi {
   'notes.get': (id: string) => Promise<Note | null>;
   'notes.save': (note: Partial<Note> & { id?: string }) => Promise<Note>;
   'notes.delete': (id: string) => Promise<boolean>;
+  'notes.move': (noteId: string, folderId: string | null) => Promise<Note | null>;
+  // folders (filesystem-style note management)
+  'folders.list': () => Promise<Folder[]>;
+  'folders.create': (input: { name: string; parent_id: string | null }) => Promise<Folder>;
+  'folders.rename': (id: string, name: string) => Promise<Folder | null>;
+  'folders.delete': (id: string) => Promise<{ deletedNoteCount: number }>;
   // settings
   'settings.get': <K extends SettingsKey>(key: K) => Promise<SettingsMap[K] | undefined>;
   'settings.set': <K extends SettingsKey>(key: K, value: SettingsMap[K]) => Promise<void>;

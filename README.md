@@ -22,6 +22,7 @@
 - **🛡️ 双重 Dirty 守卫**：窗口关闭与路由导航两层拦截未保存变更，以 `navigateIfSafe` 替代 React Router `useBlocker`，规避其组件卸载时序竞态导致的误判
 - **🔒 安全 IPC 桥**：启用 `contextIsolation` 并关闭 `nodeIntegration`，IPC 通道以常量白名单约束，渲染进程不具备 Node 能力
 - **🧩 工程化代码质量**：仓储模式事务化写入、服务层按单一职责拆分、Zustand 多 store 边界清晰、TypeScript 严格模式下零 `any` 与零 `require()`
+- **🗂️ 文件夹树管理**：邻接表 `parent_id` 自引用 CASCADE 支持无限嵌套；记事 HTML5 原生拖拽移入/移出文件夹；删除文件夹递归 CTE 收集后代并级联清理记事与聊天历史；迁移后现有记事自动落在根目录，零回归
 
 ---
 
@@ -33,6 +34,14 @@
 - **自动时间戳**：自动记录每篇记事的创建与最后修改时间
 - **未保存提示**：编辑器顶部红点 + 底部"有未保存修改"脉冲指示
 - **自动保存**：切换记事时自动保存当前内容，避免数据丢失
+
+### 📁 文件夹管理
+- **无限嵌套**：基于邻接表 `parent_id` 自引用结构，支持任意层级文件夹树
+- **拖拽整理**：记事卡片原生 HTML5 拖拽——拖到文件夹上移入，拖到空白处移回根目录
+- **级联删除**：删除非空文件夹时递归清理其内全部记事与子文件夹（聊天历史由外键 CASCADE 自动清除）
+- **就地重命名**：双击文件夹名称或通过操作按钮重命名
+- **搜索适配**：搜索时自动切换为扁平列表，清空搜索回到树形视图
+- **向后兼容**：迁移后现有记事自动落在根目录，列表外观不变
 
 ### ✍️ Markdown 编辑
 - **三视图模式**：编辑 / 预览 / 分栏（一键循环切换）
@@ -85,6 +94,7 @@ smart_notepad/
 │   │   │   ├── init.ts                # SQLite 初始化 + schema 迁移
 │   │   │   └── repositories/          # 仓储模式
 │   │   │       ├── NoteRepository.ts
+│   │   │       ├── FolderRepository.ts   # 文件夹 CRUD + 递归删除
 │   │   │       ├── ChatRepository.ts
 │   │   │       └── SettingsRepository.ts
 │   │   └── services/
@@ -101,8 +111,11 @@ smart_notepad/
 │   │       │   ├── components/
 │   │       │   │   ├── Layout.tsx     # 侧栏 + 搜索 + 主区
 │   │       │   │   ├── AiPanel.tsx    # AI 助手面板
-│   │       │   │   ├── NoteCard.tsx   # 记事卡片
+│   │       │   │   ├── NoteCard.tsx   # 记事卡片（可拖拽）
+│   │       │   │   ├── FolderCard.tsx # 文件夹卡片（drop target）
+│   │       │   │   ├── FolderTree.tsx # 顶层树容器（组装根级 + 递归）
 │   │       │   │   ├── ConfirmDialog.tsx
+│   │       │   │   ├── PromptDialog.tsx  # 文本输入对话框
 │   │       │   │   ├── IconButton.tsx
 │   │       │   │   ├── ReasoningBlock.tsx  # 思考过程折叠块
 │   │       │   │   └── Toast.tsx
@@ -115,9 +128,11 @@ smart_notepad/
 │   │       │   │   ├── useDirtyGuard.ts      # 关闭 dirty 守卫
 │   │       │   │   ├── useNavigateSafe.ts     # 安全导航
 │   │       │   │   ├── useConfirm.ts
+│   │       │   │   ├── usePrompt.ts           # 文本输入对话框
 │   │       │   │   └── useToast.ts
 │   │       │   ├── stores/
 │   │       │   │   ├── useNoteStore.ts
+│   │       │   │   ├── useFolderStore.ts      # 文件夹状态 + 折叠
 │   │       │   │   ├── useEditorStore.ts
 │   │       │   │   ├── useChatStore.ts        # 聊天状态 + 防抖持久化
 │   │       │   │   ├── useSettingsStore.ts
@@ -209,11 +224,12 @@ pnpm run build:mac
 
 | Store | 职责 |
 |---|---|
-| `useNoteStore` | 记事列表、当前选中、CRUD |
+| `useNoteStore` | 记事列表、当前选中、CRUD、移动到文件夹 |
+| `useFolderStore` | 文件夹扁平数组、折叠状态、当前选中作为新建落点 |
 | `useEditorStore` | 编辑器内容、pristine 状态、光标选区（dirty 计算依据） |
 | `useChatStore` | 按 noteId 隔离的会话桶、流式状态、防抖持久化（350ms） |
 | `useSettingsStore` | LLM 配置（baseUrl / apiKey / model） |
-| `useUiStore` | 侧栏搜索、AI 面板开关与宽度、Toast、Confirm 对话框、思考过程开关 |
+| `useUiStore` | 侧栏搜索、AI 面板开关与宽度、Toast、Confirm/Prompt 对话框、思考过程开关 |
 
 ### 聊天持久化策略
 
@@ -240,7 +256,19 @@ CREATE TABLE notes (
   title TEXT NOT NULL DEFAULT '',
   content TEXT NOT NULL DEFAULT '',
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  folder_id TEXT                      -- 所属文件夹；NULL 表示根目录（迁移加列）
+);
+CREATE INDEX idx_notes_folder_id ON notes(folder_id);
+
+-- 文件夹（邻接表，parent_id 自引用 CASCADE）
+CREATE TABLE folders (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL DEFAULT '',
+  parent_id TEXT,                      -- NULL 表示根级
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
 );
 
 -- AI 聊天会话（与 notes 1:N，CASCADE 删除）

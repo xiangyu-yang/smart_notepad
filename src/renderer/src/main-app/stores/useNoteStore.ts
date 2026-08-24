@@ -8,8 +8,10 @@ interface NoteState {
 
   loadAll: () => Promise<void>;
   loadOne: (id: string) => Promise<Note | null>;
-  createNew: () => Promise<Note>;
+  createNew: (folderId?: string | null) => Promise<Note>;
   save: (noteId: string, patch: Partial<Note>) => Promise<Note>;
+  /** 移动记事到指定文件夹（folder_id 为 null 表示根目录） */
+  move: (noteId: string, folderId: string | null) => Promise<Note | null>;
   remove: (id: string) => Promise<boolean>;
   setCurrentId: (id: string | null) => void;
   _updateOrPrepend: (note: Note) => void;
@@ -54,10 +56,11 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     return note;
   },
 
-  createNew: async () => {
+  createNew: async (folderId) => {
     const note = await window.api['notes.save']({
       title: '未命名记事',
-      content: ''
+      content: '',
+      folder_id: folderId ?? null
     });
     get()._updateOrPrepend(note);
     set({ currentId: note.id });
@@ -70,6 +73,14 @@ export const useNoteStore = create<NoteState>((set, get) => ({
       ...patch
     });
     get()._updateOrPrepend(updated);
+    return updated;
+  },
+
+  move: async (noteId, folderId) => {
+    const updated = await window.api['notes.move'](noteId, folderId);
+    if (updated) {
+      get()._updateOrPrepend(updated);
+    }
     return updated;
   },
 

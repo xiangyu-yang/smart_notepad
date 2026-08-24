@@ -1,7 +1,8 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '@shared/constants';
-import type { ChatSession, Note, SettingsKey, SettingsMap } from '@shared/types';
+import type { ChatSession, Folder, Note, SettingsKey, SettingsMap } from '@shared/types';
 import { ChatRepository } from './db/repositories/ChatRepository';
+import { FolderRepository } from './db/repositories/FolderRepository';
 import { NoteRepository } from './db/repositories/NoteRepository';
 import { SettingsRepository } from './db/repositories/SettingsRepository';
 import { WindowManager } from './window/WindowManager';
@@ -50,6 +51,69 @@ export function registerIpcHandlers(): void {
       return false;
     }
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.NOTES_MOVE,
+    (_e, noteId: string, folderId: string | null): Note | null => {
+      try {
+        const note = NoteRepository.move(noteId, folderId);
+        if (note) {
+          // 复用现有广播，多窗口天然同步
+          WindowManager.shared.broadcastNoteUpdated(note);
+        }
+        return note;
+      } catch (e) {
+        console.error('[ipc] notes.move error:', e);
+        return null;
+      }
+    }
+  );
+
+  // ---------- folders ----------
+  ipcMain.handle(IPC_CHANNELS.FOLDERS_LIST, (): Folder[] => {
+    try {
+      return FolderRepository.list();
+    } catch (e) {
+      console.error('[ipc] folders.list error:', e);
+      return [];
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.FOLDERS_CREATE,
+    (_e, input: { name: string; parent_id: string | null }): Folder => {
+      try {
+        return FolderRepository.create(input);
+      } catch (e) {
+        console.error('[ipc] folders.create error:', e);
+        throw e;
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.FOLDERS_RENAME,
+    (_e, id: string, name: string): Folder | null => {
+      try {
+        return FolderRepository.rename(id, name);
+      } catch (e) {
+        console.error('[ipc] folders.rename error:', e);
+        return null;
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.FOLDERS_DELETE,
+    (_e, id: string): { deletedNoteCount: number } => {
+      try {
+        return FolderRepository.remove(id);
+      } catch (e) {
+        console.error('[ipc] folders.delete error:', e);
+        return { deletedNoteCount: 0 };
+      }
+    }
+  );
 
   // ---------- settings ----------
   ipcMain.handle(

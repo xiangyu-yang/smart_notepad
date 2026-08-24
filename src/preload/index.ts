@@ -7,6 +7,7 @@ import { IPC_CHANNELS } from '@shared/constants';
 import type {
   IpcApi,
   Note,
+  Folder,
   SettingsKey,
   SettingsMap,
   WindowApi,
@@ -24,6 +25,14 @@ const ipcApi: IpcApi = {
   'notes.get': (id) => invoke(IPC_CHANNELS.NOTES_GET, id),
   'notes.save': (note) => invoke(IPC_CHANNELS.NOTES_SAVE, note),
   'notes.delete': (id) => invoke(IPC_CHANNELS.NOTES_DELETE, id),
+  'notes.move': (noteId, folderId) =>
+    invoke<Note | null>(IPC_CHANNELS.NOTES_MOVE, noteId, folderId),
+  'folders.list': () => invoke<Folder[]>(IPC_CHANNELS.FOLDERS_LIST),
+  'folders.create': (input) => invoke<Folder>(IPC_CHANNELS.FOLDERS_CREATE, input),
+  'folders.rename': (id, name) =>
+    invoke<Folder | null>(IPC_CHANNELS.FOLDERS_RENAME, id, name),
+  'folders.delete': (id) =>
+    invoke<{ deletedNoteCount: number }>(IPC_CHANNELS.FOLDERS_DELETE, id),
   'settings.get': <K extends SettingsKey>(key: K) =>
     invoke<SettingsMap[K] | undefined>(IPC_CHANNELS.SETTINGS_GET, key),
   'settings.set': <K extends SettingsKey>(key: K, value: SettingsMap[K]) =>

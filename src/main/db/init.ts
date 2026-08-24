@@ -80,6 +80,17 @@ export function initializeDatabase(): Database.Database {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL DEFAULT ''
     );
+
+    CREATE TABLE IF NOT EXISTS folders (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL DEFAULT '',
+      parent_id TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id);
+    CREATE INDEX IF NOT EXISTS idx_folders_updated_at ON folders(updated_at DESC);
   `);
 
   // --- 轻量级 schema 迁移：给已存在的 chat_messages 表补 reasoning 列 ---
@@ -91,6 +102,19 @@ export function initializeDatabase(): Database.Database {
     }
   } catch (e) {
     console.warn('[db] migration: add reasoning column failed:', e);
+  }
+
+  // --- 迁移：notes 表补 folder_id 列 ---
+  // SQLite ALTER ADD COLUMN 不能带 REFERENCES 子句，采用"加列 + 应用层级联"策略：
+  // 删除文件夹时由 FolderRepository.remove 在事务内显式删除该文件夹下记事。
+  try {
+    const noteCols = db.prepare("PRAGMA table_info(notes)").all() as Array<{ name: string }>;
+    if (noteCols.length > 0 && !noteCols.some((c) => c.name === 'folder_id')) {
+      db.exec('ALTER TABLE notes ADD COLUMN folder_id TEXT');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_notes_folder_id ON notes(folder_id)');
+    }
+  } catch (e) {
+    console.warn('[db] migration: add notes.folder_id column failed:', e);
   }
 
   dbInstance = db;
