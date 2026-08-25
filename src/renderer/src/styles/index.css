@@ -104,6 +104,35 @@ body {
   color: #53514A;
   margin-left: 0;
 }
+/* 行内 HTML 标签样式（rehype-raw 解析后生效） */
+.prose-note mark {
+  background: #FFF3B0;
+  color: #3A3832;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+.prose-note u {
+  text-decoration: underline;
+  text-decoration-color: #53514A;
+  text-underline-offset: 2px;
+}
+.prose-note ins {
+  text-decoration: underline;
+  text-decoration-color: #5E8B72;
+  text-underline-offset: 2px;
+}
+.prose-note del {
+  color: #9B9890;
+}
+.prose-note sub,
+.prose-note sup {
+  font-size: 0.75em;
+  line-height: 0;
+  position: relative;
+  vertical-align: baseline;
+}
+.prose-note sub { top: 0.3em; }
+.prose-note sup { bottom: 0.5em; }
 
 /* textarea 细节 */
 textarea.editor-textarea {

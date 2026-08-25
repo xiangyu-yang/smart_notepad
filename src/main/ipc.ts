@@ -145,6 +145,14 @@ export function registerIpcHandlers(): void {
   .prose-note th { background: #F1ECE0; font-weight: 600; }
   .prose-note img { max-width: 100%; height: auto; }
   .prose-note hr { border: none; border-top: 1px solid #DFD3B8; margin: 1.4em 0; }
+  /* 行内 HTML 标签样式（rehype-raw 解析后生效，与渲染进程预览一致） */
+  .prose-note mark { background: #FFF3B0; color: #3A3832; padding: 1px 2px; border-radius: 3px; }
+  .prose-note u { text-decoration: underline; text-decoration-color: #53514A; text-underline-offset: 2px; }
+  .prose-note ins { text-decoration: underline; text-decoration-color: #5E8B72; text-underline-offset: 2px; }
+  .prose-note del { color: #9B9890; }
+  .prose-note sub, .prose-note sup { font-size: 0.75em; line-height: 0; position: relative; vertical-align: baseline; }
+  .prose-note sub { top: 0.3em; }
+  .prose-note sup { bottom: 0.5em; }
   /* 打印分页优化：避免标题孤立在页底、代码块/表格被分页截断 */
   h1, h2, h3, h4, h5, h6 { page-break-after: avoid; break-after: avoid; }
   pre, table, img, blockquote { page-break-inside: avoid; break-inside: avoid; }

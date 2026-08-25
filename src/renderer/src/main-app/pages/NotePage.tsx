@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef, lazy, Suspense, useMemo } fro
 import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { router } from '../App';
 import { useNoteStore } from '../stores/useNoteStore';
@@ -457,7 +458,9 @@ export default function NotePage() {
       // 把 Markdown 渲染成 HTML 字符串（与预览完全一致），传给主进程在独立 print 窗口内排版
       // 主进程创建隐藏 BrowserWindow 加载该 HTML，printToPDF 得到纯净 PDF（只含笔记文本，不含应用 UI）
       const innerHtml = renderToStaticMarkup(
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{editorContent || ''}</ReactMarkdown>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+          {editorContent || ''}
+        </ReactMarkdown>
       );
       const result = await window.api['notes.exportPdf']({
         defaultName: editorTitle?.trim() || '未命名记事',
@@ -659,7 +662,7 @@ export default function NotePage() {
             >
               <div className="px-8 py-7 max-w-none prose prose-note animate-fadeIn">
                 {editorContent ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
                     {editorContent}
                   </ReactMarkdown>
                 ) : (

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, memo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { useUiStore } from '../stores/useUiStore';
 import { useEditorStore } from '../stores/useEditorStore';
@@ -374,7 +375,7 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
                     )}
                     <div className="prose prose-note max-w-none prose-p:my-2 prose-headings:my-3 prose-headings:text-base prose-p:text-[14px] prose-li:text-[14px] prose-strong:text-ink-900 prose-code:text-[13px] prose-pre:text-[13px]">
                       {msg.content ? (
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
                           {msg.content}
                         </ReactMarkdown>
                       ) : streamingId === msg.id && !msg.reasoning?.trim() ? (

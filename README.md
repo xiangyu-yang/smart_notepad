@@ -26,6 +26,7 @@
 - **📐 纯文本 PDF 导出**：独立隐藏 print 窗口加载纯净 HTML（`renderToStaticMarkup` 渲染 Markdown，复用 `prose-note` 样式），与预览 1:1 一致；规避直接打印主窗口导致的"截屏式"输出与 UI 元素混入；A4 纸张 + 标准页边距，可选可复制
 - **📎 附件管理**：附件二进制以 base64 持久化于 SQLite，杜绝文件系统散落；`.docx` 经 [mammoth](https://github.com/mwilliamson/mammoth.js) 按需转 HTML 在线预览，图片/PDF 直接渲染，其余格式提供下载入口
 - **🔁 展开状态持久化**：文件夹折叠/展开状态写入 SQLite `settings` 表（而非 localStorage），应用重启或清除浏览器痕迹后仍可恢复用户习惯；首次进入默认折叠，手动展开才记忆
+- **🎨 行内 HTML 标签渲染**：经 [`rehype-raw`](https://github.com/rehypejs/rehype-raw) 解析 Markdown 内嵌原始 HTML，`<mark>` 高亮、`<u>`/`<ins>` 下划线、`<del>` 删除线、`<sup>`/`<sub>` 上下标等标签在预览、AI 回复、PDF 导出三处一致渲染；本地可信数据源 + Electron CSP 双重保障，无 XSS 风险
 
 ---
 
@@ -62,6 +63,7 @@
 ### ✍️ Markdown 编辑
 - **三视图模式**：编辑 / 预览 / 分栏（一键循环切换）
 - **实时渲染**：基于 `react-markdown` + `remark-gfm`，支持表格、任务列表等 GFM 语法
+- **行内 HTML 标签**：经 `rehype-raw` 解析原始 HTML，支持 `<mark>` 高亮、`<u>`/`<ins>` 下划线、`<del>` 删除线、`<sup>`/`<sub>` 上下标等富文本表达
 - **柔和排版**：自定义 `prose-note` 样式，配色与纸张质感统一
 - **快捷键保存**：`⌘/Ctrl + S` 一键保存
 
