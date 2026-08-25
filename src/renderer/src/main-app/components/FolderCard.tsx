@@ -30,14 +30,39 @@ export function countNotesUnder(
 
 /** 自定义 DnD MIME，标识拖拽源为记事 */
 const NOTE_DND_MIME = 'application/x-note-id';
+/** 自定义 DnD MIME，标识拖拽源为文件夹 */
+const FOLDER_DND_MIME = 'application/x-folder-id';
+
+/**
+ * 循环检测：检查 targetId 是否在 folderId 的子树中（含 folderId 自己）。
+ * 用于移动文件夹时的合法性校验——不能把文件夹拖到自己或自己的后代下，否则形成环。
+ */
+function isInSubtree(
+  folderId: string,
+  targetId: string,
+  childrenByParent: Map<string | null, Folder[]>
+): boolean {
+  if (folderId === targetId) return true;
+  const stack = [folderId];
+  while (stack.length) {
+    const cur = stack.pop()!;
+    for (const c of childrenByParent.get(cur) ?? []) {
+      if (c.id === targetId) return true;
+      stack.push(c.id);
+    }
+  }
+  return false;
+}
 
 export default function FolderCard({ folder, depth, childrenByParent, notesByFolder }: Props) {
-  const expanded = useFolderStore((s) => s.expanded[folder.id] ?? true);
+  // 默认折叠：未记录展开状态的文件夹一律折叠，用户手动展开后由 store 持久化到 localStorage
+  const expanded = useFolderStore((s) => s.expanded[folder.id] ?? false);
   const toggleExpand = useFolderStore((s) => s.toggleExpand);
   const setCurrentFolderId = useFolderStore((s) => s.setCurrentFolderId);
   const createFolder = useFolderStore((s) => s.create);
   const renameFolder = useFolderStore((s) => s.rename);
   const removeFolder = useFolderStore((s) => s.remove);
+  const moveFolder = useFolderStore((s) => s.move);
   const moveNote = useNoteStore((s) => s.move);
   const loadAllNotes = useNoteStore((s) => s.loadAll);
   const confirm = useConfirm();
@@ -106,19 +131,46 @@ export default function FolderCard({ folder, depth, childrenByParent, notesByFol
     );
   };
 
-  // ---- HTML5 DnD：作为记事拖入的 drop target ----
+  // ---- HTML5 DnD：文件夹作为拖拽源 ----
+  const onDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData(FOLDER_DND_MIME, folder.id);
+    e.dataTransfer.effectAllowed = 'move';
+  };
+
+  // ---- HTML5 DnD：作为记事 / 文件夹拖入的 drop target ----
   const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(NOTE_DND_MIME)) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      setIsDropTarget(true);
-    }
+    const types = e.dataTransfer.types;
+    // 同时接受记事和文件夹拖拽
+    if (!types.includes(NOTE_DND_MIME) && !types.includes(FOLDER_DND_MIME)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setIsDropTarget(true);
   };
   const onDragLeave = () => setIsDropTarget(false);
   const onDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation(); // 阻止冒泡到根 drop target，避免重复处理
     setIsDropTarget(false);
+    // 先尝试文件夹拖拽（getData 在 drop 阶段才有值）
+    const srcFolderId = e.dataTransfer.getData(FOLDER_DND_MIME);
+    if (srcFolderId) {
+      if (srcFolderId === folder.id) return; // 拖到自己，无操作
+      // 循环检测：目标不能是源的后代（含源自己），否则形成环
+      if (isInSubtree(srcFolderId, folder.id, childrenByParent)) {
+        toast.error('不能移动文件夹到自己的子文件夹下');
+        return;
+      }
+      try {
+        const updated = await moveFolder(srcFolderId, folder.id);
+        if (updated) toast.success('已移动文件夹');
+        else toast.error('移动失败');
+      } catch (err) {
+        // 后端循环检测兜底：捕获错误信息做 toast
+        toast.error(err instanceof Error ? err.message : '移动失败');
+      }
+      return;
+    }
+    // 再尝试记事拖拽（已有逻辑）
     const noteId = e.dataTransfer.getData(NOTE_DND_MIME);
     if (!noteId) return;
     const note = useNoteStore.getState().notes.find((n) => n.id === noteId);
@@ -133,9 +185,11 @@ export default function FolderCard({ folder, depth, childrenByParent, notesByFol
     <div className="select-none">
       <div
         onClick={handleHeaderClick}
+        onDragStart={onDragStart}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
+        draggable
         className={[
           'group flex items-center gap-2 px-3 py-2 rounded-xl cursor-pointer transition-all duration-150',
           'hover:bg-paper-200/70',
@@ -145,7 +199,12 @@ export default function FolderCard({ folder, depth, childrenByParent, notesByFol
             ? 'ring-1 ring-sage-400/60'
             : ''
         ].join(' ')}
-        style={{ marginLeft: depth * 16 }}
+        style={{
+          marginLeft: depth * 16,
+          // 强制启用元素拖拽，绕过父级 select-none（user-select:none）对
+          // draggable 元素 dragstart 的抑制（Chromium 已知行为）
+          WebkitUserDrag: 'element'
+        } as React.CSSProperties}
       >
         <span className="text-sm shrink-0">{expanded ? '📂' : '📁'}</span>
         <span
@@ -159,6 +218,7 @@ export default function FolderCard({ folder, depth, childrenByParent, notesByFol
         <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex gap-0.5 shrink-0">
           <button
             onClick={handleCreateChild}
+            onMouseDown={(e) => e.stopPropagation()}
             title="新建子文件夹"
             className="no-drag w-6 h-6 rounded-md hover:bg-paper-200 flex items-center justify-center text-ink-500 hover:text-sage-600 transition-colors text-xs"
           >
@@ -166,6 +226,7 @@ export default function FolderCard({ folder, depth, childrenByParent, notesByFol
           </button>
           <button
             onClick={handleDelete}
+            onMouseDown={(e) => e.stopPropagation()}
             title="删除文件夹"
             className="no-drag w-6 h-6 rounded-md hover:bg-paper-200 flex items-center justify-center text-ink-500 hover:text-rose-600 transition-colors text-xs"
           >

@@ -27,8 +27,18 @@ export const IPC_CHANNELS = {
   FOLDERS_CREATE: 'folders.create',
   FOLDERS_RENAME: 'folders.rename',
   FOLDERS_DELETE: 'folders.delete',
+  // 移动文件夹到新父级（newParentId=null 表示移到根级）
+  FOLDERS_MOVE: 'folders.move',
   // Move a note into a folder (folder_id null = root)
-  NOTES_MOVE: 'notes.move'
+  NOTES_MOVE: 'notes.move',
+  // Export current note to PDF
+  NOTES_EXPORT_PDF: 'notes.exportPdf',
+  // Attachments
+  ATTACHMENTS_LIST: 'attachments.list',
+  ATTACHMENTS_UPLOAD: 'attachments.upload',
+  ATTACHMENTS_GET: 'attachments.get',
+  ATTACHMENTS_DOWNLOAD: 'attachments.download',
+  ATTACHMENTS_DELETE: 'attachments.delete'
 } as const;
 
 export const DB_FILE = 'smart_notepad.db';

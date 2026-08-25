@@ -22,7 +22,10 @@
 - **🛡️ 双重 Dirty 守卫**：窗口关闭与路由导航两层拦截未保存变更，以 `navigateIfSafe` 替代 React Router `useBlocker`，规避其组件卸载时序竞态导致的误判
 - **🔒 安全 IPC 桥**：启用 `contextIsolation` 并关闭 `nodeIntegration`，IPC 通道以常量白名单约束，渲染进程不具备 Node 能力
 - **🧩 工程化代码质量**：仓储模式事务化写入、服务层按单一职责拆分、Zustand 多 store 边界清晰、TypeScript 严格模式下零 `any` 与零 `require()`
-- **🗂️ 文件夹树管理**：邻接表 `parent_id` 自引用 CASCADE 支持无限嵌套；记事 HTML5 原生拖拽移入/移出文件夹；删除文件夹递归 CTE 收集后代并级联清理记事与聊天历史；迁移后现有记事自动落在根目录，零回归
+- **🗂️ 文件夹树管理**：邻接表 `parent_id` 自引用 CASCADE 支持无限嵌套；记事与文件夹均支持 HTML5 原生拖拽——拖到目标文件夹移入、拖到空白处移回根级；移动后端递归 CTE 循环检测，前端 `isInSubtree` 预检 + 后端兜底双重防护，杜绝 parent_id 成环；删除文件夹递归 CTE 收集后代并级联清理记事与聊天历史
+- **📐 纯文本 PDF 导出**：独立隐藏 print 窗口加载纯净 HTML（`renderToStaticMarkup` 渲染 Markdown，复用 `prose-note` 样式），与预览 1:1 一致；规避直接打印主窗口导致的"截屏式"输出与 UI 元素混入；A4 纸张 + 标准页边距，可选可复制
+- **📎 附件管理**：附件二进制以 base64 持久化于 SQLite，杜绝文件系统散落；`.docx` 经 [mammoth](https://github.com/mwilliamson/mammoth.js) 按需转 HTML 在线预览，图片/PDF 直接渲染，其余格式提供下载入口
+- **🔁 展开状态持久化**：文件夹折叠/展开状态写入 SQLite `settings` 表（而非 localStorage），应用重启或清除浏览器痕迹后仍可恢复用户习惯；首次进入默认折叠，手动展开才记忆
 
 ---
 
@@ -37,11 +40,24 @@
 
 ### 📁 文件夹管理
 - **无限嵌套**：基于邻接表 `parent_id` 自引用结构，支持任意层级文件夹树
-- **拖拽整理**：记事卡片原生 HTML5 拖拽——拖到文件夹上移入，拖到空白处移回根目录
+- **双对象拖拽**：记事与文件夹均支持原生 HTML5 拖拽——拖到目标文件夹移入、拖到空白处移回根级；文件夹拖拽含循环检测，禁止拖到自身或子文件夹下
+- **展开状态记忆**：折叠/展开状态持久化到 SQLite `settings` 表，重启或清缓存后恢复用户习惯；默认折叠，手动展开才记忆
 - **级联删除**：删除非空文件夹时递归清理其内全部记事与子文件夹（聊天历史由外键 CASCADE 自动清除）
 - **就地重命名**：双击文件夹名称或通过操作按钮重命名
 - **搜索适配**：搜索时自动切换为扁平列表，清空搜索回到树形视图
 - **向后兼容**：迁移后现有记事自动落在根目录，列表外观不变
+
+### 📎 附件管理
+- **二进制入库**：附件以 base64 存入 SQLite，无散落文件，随记事一起备份/迁移
+- **多格式预览**：图片直接渲染、PDF 内嵌预览、`.docx` 经 mammoth 转 HTML 在线阅读
+- **下载保存**：任意附件可一键下载到本地，默认文件名沿用原始上传名
+- **增删同步**：上传/删除即时刷新列表，切换记事自动加载对应附件
+
+### 📐 PDF 导出
+- **纯文本输出**：独立隐藏 print 窗口加载纯净 HTML，与预览 1:1 一致，可选可复制（非截屏）
+- **导出前置自动保存**：触发导出时先 flush 未保存的编辑内容，确保导出的是最新版本
+- **标准排版**：A4 纸张、1.8cm 上下 / 1.6cm 左右页边距、页脚显示"标题 / 页 N/M"
+- **安全文件名**：记事标题中的非法字符自动替换为 `_`，空标题回退为"未命名记事.pdf"
 
 ### ✍️ Markdown 编辑
 - **三视图模式**：编辑 / 预览 / 分栏（一键循环切换）
@@ -71,10 +87,12 @@
 |---|---|
 | **桌面框架** | Electron 32 + electron-vite |
 | **前端框架** | React 18 + React Router 6 (hash router) |
-| **状态管理** | Zustand 4（多 store：note / editor / chat / settings / ui） |
+| **状态管理** | Zustand 4（多 store：note / folder / editor / chat / attachment / settings / ui） |
 | **样式** | Tailwind CSS 3 + `@tailwindcss/typography` |
 | **数据库** | better-sqlite3（WAL 模式 + 外键级联） |
 | **AI 接口** | Ollama 原生 `/api/chat`（NDJSON 流式） |
+| **附件预览** | mammoth（`.docx` → HTML，按需动态导入） |
+| **PDF 导出** | Electron 原生 `printToPDF`（零前端依赖） |
 | **构建工具** | Vite 5 + TypeScript 5.6 |
 | **包管理** | pnpm（node-linker=hoisted） |
 
@@ -94,7 +112,8 @@ smart_notepad/
 │   │   │   ├── init.ts                # SQLite 初始化 + schema 迁移
 │   │   │   └── repositories/          # 仓储模式
 │   │   │       ├── NoteRepository.ts
-│   │   │       ├── FolderRepository.ts   # 文件夹 CRUD + 递归删除
+│   │   │       ├── FolderRepository.ts   # 文件夹 CRUD + 递归删除 + 移动（循环检测）
+│   │   │       ├── AttachmentRepository.ts # 附件 CRUD（base64 入库）
 │   │   │       ├── ChatRepository.ts
 │   │   │       └── SettingsRepository.ts
 │   │   └── services/
@@ -108,17 +127,19 @@ smart_notepad/
 │   │       ├── main-app/
 │   │       │   ├── App.tsx            # 路由 + lazy 懒加载
 │   │       │   ├── main.tsx           # React 入口
-│   │       │   ├── components/
-│   │       │   │   ├── Layout.tsx     # 侧栏 + 搜索 + 主区
-│   │       │   │   ├── AiPanel.tsx    # AI 助手面板
-│   │       │   │   ├── NoteCard.tsx   # 记事卡片（可拖拽）
-│   │       │   │   ├── FolderCard.tsx # 文件夹卡片（drop target）
-│   │       │   │   ├── FolderTree.tsx # 顶层树容器（组装根级 + 递归）
-│   │       │   │   ├── ConfirmDialog.tsx
-│   │       │   │   ├── PromptDialog.tsx  # 文本输入对话框
-│   │       │   │   ├── IconButton.tsx
-│   │       │   │   ├── ReasoningBlock.tsx  # 思考过程折叠块
-│   │       │   │   └── Toast.tsx
+│   │       │   │   ├── components/
+│   │       │   │   │   │   ├── Layout.tsx     # 侧栏 + 搜索 + 主区
+│   │       │   │   │   │   ├── AiPanel.tsx    # AI 助手面板
+│   │       │   │   │   │   ├── NoteCard.tsx   # 记事卡片（可拖拽）
+│   │       │   │   │   │   ├── FolderCard.tsx # 文件夹卡片（可拖拽 + drop target）
+│   │       │   │   │   │   ├── FolderTree.tsx # 顶层树容器（组装根级 + 递归）
+│   │       │   │   │   │   ├── AttachmentCard.tsx    # 附件卡片
+│   │       │   │   │   │   ├── AttachmentPreview.tsx # 附件预览（图片/PDF/docx）
+│   │       │   │   │   │   ├── ConfirmDialog.tsx
+│   │       │   │   │   │   ├── PromptDialog.tsx  # 文本输入对话框
+│   │       │   │   │   │   ├── IconButton.tsx
+│   │       │   │   │   │   ├── ReasoningBlock.tsx  # 思考过程折叠块
+│   │       │   │   │   │   └── Toast.tsx
 │   │       │   ├── pages/
 │   │       │   │   ├── HomePage.tsx
 │   │       │   │   ├── NotePage.tsx   # 编辑器主页面
@@ -132,9 +153,10 @@ smart_notepad/
 │   │       │   │   └── useToast.ts
 │   │       │   ├── stores/
 │   │       │   │   ├── useNoteStore.ts
-│   │       │   │   ├── useFolderStore.ts      # 文件夹状态 + 折叠
+│   │       │   │   ├── useFolderStore.ts      # 文件夹状态 + 折叠持久化
 │   │       │   │   ├── useEditorStore.ts
 │   │       │   │   ├── useChatStore.ts        # 聊天状态 + 防抖持久化
+│   │       │   │   ├── useAttachmentStore.ts  # 附件列表 + CRUD
 │   │       │   │   ├── useSettingsStore.ts
 │   │       │   │   └── useUiStore.ts
 │   │       │   └── utils/
@@ -145,7 +167,8 @@ smart_notepad/
 │   │
 │   └── shared/
 │       ├── types.ts                   # 主进程 / 渲染进程共享类型
-│       └── constants.ts               # IPC 通道常量、DB 文件名
+│       ├── constants.ts               # IPC 通道常量、DB 文件名
+│       └── mime-utils.ts              # 附件 MIME 类型推断 + 预览分类
 │
 ├── electron.vite.config.ts            # main / preload / renderer 三入口
 ├── tailwind.config.js
@@ -225,9 +248,10 @@ pnpm run build:mac
 | Store | 职责 |
 |---|---|
 | `useNoteStore` | 记事列表、当前选中、CRUD、移动到文件夹 |
-| `useFolderStore` | 文件夹扁平数组、折叠状态、当前选中作为新建落点 |
+| `useFolderStore` | 文件夹扁平数组、折叠状态（SQLite 持久化）、移动、当前选中作为新建落点 |
 | `useEditorStore` | 编辑器内容、pristine 状态、光标选区（dirty 计算依据） |
 | `useChatStore` | 按 noteId 隔离的会话桶、流式状态、防抖持久化（350ms） |
+| `useAttachmentStore` | 附件列表、上传/删除、当前预览项 |
 | `useSettingsStore` | LLM 配置（baseUrl / apiKey / model） |
 | `useUiStore` | 侧栏搜索、AI 面板开关与宽度、Toast、Confirm/Prompt 对话框、思考过程开关 |
 
@@ -300,7 +324,20 @@ CREATE TABLE chat_active_session (
   session_id TEXT
 );
 
--- 应用设置（key-value）
+-- 附件（base64 二进制入库，随记事一起备份/迁移）
+CREATE TABLE attachments (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  filename TEXT NOT NULL DEFAULT '',
+  mime TEXT NOT NULL DEFAULT 'application/octet-stream',
+  size INTEGER NOT NULL DEFAULT 0,
+  data TEXT NOT NULL DEFAULT '',         -- base64 编码
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_attachments_note_id ON attachments(note_id);
+
+-- 应用设置（key-value；含 LLM 配置、文件夹展开状态等）
 CREATE TABLE settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL DEFAULT ''

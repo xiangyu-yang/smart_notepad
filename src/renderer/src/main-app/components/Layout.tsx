@@ -8,6 +8,7 @@ import FolderTree from './FolderTree';
 import ConfirmDialog from './ConfirmDialog';
 import PromptDialog from './PromptDialog';
 import ToastContainer from './Toast';
+import { AttachmentPreview } from './AttachmentPreview';
 import IconButton from './IconButton';
 import { useToast } from '../hooks/useToast';
 import { useNavigateSafe } from '../hooks/useNavigateSafe';
@@ -183,6 +184,7 @@ export default function Layout() {
       <ToastContainer />
       <ConfirmDialog />
       <PromptDialog />
+      <AttachmentPreview />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import type { Attachment } from '@shared/types';
 
 export type ToastType = 'success' | 'error' | 'info';
 
@@ -43,6 +44,8 @@ interface UiState {
   reasoningEnabled: boolean;
   /** AI 面板宽度（px），可拖动调整 */
   aiPanelWidth: number;
+  /** 文件预览弹窗：当前正在预览的附件；null 则弹窗关闭 */
+  attachmentPreview: { attachment: Attachment } | null;
 
   setSidebarSearch: (v: string) => void;
   setShowAiPanel: (v: boolean) => void;
@@ -50,6 +53,8 @@ interface UiState {
   setReasoningEnabled: (v: boolean) => void;
   toggleReasoning: () => void;
   setAiPanelWidth: (w: number) => void;
+  openAttachmentPreview: (attachment: Attachment) => void;
+  closeAttachmentPreview: () => void;
 
   pushToast: (toast: Omit<Toast, 'id'>) => void;
   popToast: (id: string) => void;
@@ -75,6 +80,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   promptResolver: null,
   reasoningEnabled: true, // 默认开启思考过程，让用户能看见模型"在想什么"
   aiPanelWidth: 380, // AI 面板默认宽度
+  attachmentPreview: null,
 
   setSidebarSearch: (v) => set({ sidebarSearch: v }),
   setShowAiPanel: (v) => set({ showAiPanel: v }),
@@ -82,6 +88,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   setReasoningEnabled: (v) => set({ reasoningEnabled: v }),
   toggleReasoning: () => set({ reasoningEnabled: !get().reasoningEnabled }),
   setAiPanelWidth: (w) => set({ aiPanelWidth: Math.max(280, Math.min(640, w)) }),
+  openAttachmentPreview: (attachment) => set({ attachmentPreview: { attachment } }),
+  closeAttachmentPreview: () => set({ attachmentPreview: null }),
 
   pushToast: (toast) => {
     const id = `toast_${++toastSeq}_${Date.now()}`;

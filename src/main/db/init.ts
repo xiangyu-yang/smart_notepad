@@ -91,6 +91,19 @@ export function initializeDatabase(): Database.Database {
     );
     CREATE INDEX IF NOT EXISTS idx_folders_parent_id ON folders(parent_id);
     CREATE INDEX IF NOT EXISTS idx_folders_updated_at ON folders(updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS attachments (
+      id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL,
+      file_name TEXT NOT NULL DEFAULT '',
+      original_name TEXT NOT NULL DEFAULT '',
+      mime_type TEXT NOT NULL DEFAULT '',
+      size INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_attachments_note_id ON attachments(note_id);
   `);
 
   // --- 轻量级 schema 迁移：给已存在的 chat_messages 表补 reasoning 列 ---

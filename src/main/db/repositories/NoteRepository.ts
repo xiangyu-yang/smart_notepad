@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Note } from '@shared/types';
 import { getDb } from '../init';
+import { AttachmentRepository } from './AttachmentRepository';
 
 /**
  * NoteRepository - 仓储模式：封装 notes 表所有访问
@@ -119,6 +120,8 @@ export class NoteRepository {
       changed = info.changes;
     });
     tx();
+    // 级联删除附件磁盘文件（chat/attachments DB 行由 FK CASCADE 自动删）
+    if (changed > 0) AttachmentRepository.removeAllForNote(id);
     return changed > 0;
   }
 }

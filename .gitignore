@@ -36,6 +36,9 @@ yarn-error.log*
 *.db-shm
 .data/
 
+# 附件存储目录（用户上传的二进制文件，属用户数据，不入库）
+attachments/
+
 # Electron 单例运行时锁文件（每次启动自动重建，不应入库）
 SingletonCookie
 SingletonLock

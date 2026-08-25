@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Folder } from '@shared/types';
 import { getDb } from '../init';
+import { AttachmentRepository } from './AttachmentRepository';
 
 /**
  * FolderRepository - 仓储模式：封装 folders 表所有访问
@@ -65,6 +66,47 @@ export class FolderRepository {
   }
 
   /**
+   * 移动文件夹到新的父级下（newParentId = null 表示移到根级）。
+   * 事务内做循环检测：newParentId 不能是 id 本身，也不能是 id 的任何后代，
+   * 否则会形成 parent_id 环导致树结构损坏。
+   */
+  static move(id: string, newParentId: string | null): Folder | null {
+    const db = getDb();
+    const cur = db.prepare('SELECT * FROM folders WHERE id = ?').get(id) as Folder | undefined;
+    if (!cur) return null;
+    if (id === newParentId) throw new Error('不能移动文件夹到自身');
+    if (newParentId) {
+      // 父级存在性校验（应用层兜底，防止悬挂引用）
+      const p = db.prepare('SELECT 1 FROM folders WHERE id = ?').get(newParentId);
+      if (!p) throw new Error('目标文件夹不存在');
+      // 循环检测：递归 CTE 收集 id 的所有后代，newParentId 不能在其中
+      const desc = db
+        .prepare(
+          `WITH RECURSIVE desc(cid) AS (
+             SELECT id FROM folders WHERE parent_id = ?
+             UNION ALL
+             SELECT f.id FROM folders f JOIN desc ON f.parent_id = desc.cid
+           )
+           SELECT cid FROM desc`
+        )
+        .all(id) as Array<{ cid: string }>;
+      if (desc.some((r) => r.cid === newParentId)) {
+        throw new Error('不能移动文件夹到自己的子文件夹下');
+      }
+    }
+    const now = Date.now();
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE folders SET parent_id = ?, updated_at = ? WHERE id = ?').run(
+        newParentId,
+        now,
+        id
+      );
+    });
+    tx();
+    return { ...cur, parent_id: newParentId, updated_at: now };
+  }
+
+  /**
    * 删除文件夹。事务内：
    *   1. 递归 CTE 收集本文件夹 + 所有后代文件夹 id
    *   2. 删除挂在这些文件夹下的 notes（应用层级联，notes.folder_id 无 DB FK）
@@ -92,6 +134,13 @@ export class FolderRepository {
 
       // 删除挂在这些文件夹下的 notes（应用层级联）
       const placeholders = allIds.map(() => '?').join(',');
+      // 先收集被删的 note id，以便在 DB CASCADE 之前清理磁盘附件
+      const affectedNotes = db
+        .prepare(
+          `SELECT id FROM notes WHERE folder_id IN (${placeholders})`
+        )
+        .all(...allIds) as Array<{ id: string }>;
+
       const info = db
         .prepare(`DELETE FROM notes WHERE folder_id IN (${placeholders})`)
         .run(...allIds);
@@ -99,6 +148,11 @@ export class FolderRepository {
 
       // 删除文件夹本体（子文件夹由 parent_id CASCADE 自动删）
       db.prepare('DELETE FROM folders WHERE id = ?').run(id);
+
+      // 清理附件磁盘文件（attachments DB 行由 FK CASCADE 自动删）
+      for (const { id: nid } of affectedNotes) {
+        AttachmentRepository.removeAllForNote(nid);
+      }
     });
     tx();
     return { deletedNoteCount };

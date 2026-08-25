@@ -7,17 +7,19 @@ import FolderCard from './FolderCard';
 import NoteCard from './NoteCard';
 
 const NOTE_DND_MIME = 'application/x-note-id';
+const FOLDER_DND_MIME = 'application/x-folder-id';
 
 /**
  * 顶层文件夹树容器：
  * - 把扁平 folders + notes 按 parent_id / folder_id 分组为 Map
  * - 渲染根级 folders（递归 FolderCard）+ 根级 notes
- * - 外层 div 作为根 drop target：拖记事到空白处 = 移回根目录
+ * - 外层 div 作为根 drop target：拖记事/文件夹到空白处 = 移回根目录
  */
 export default function FolderTree() {
   const folders = useFolderStore((s) => s.folders);
   const notes = useNoteStore((s) => s.notes);
   const moveNote = useNoteStore((s) => s.move);
+  const moveFolder = useFolderStore((s) => s.move);
   const toast = useToast();
 
   const childrenByParent = useMemo(() => {
@@ -49,13 +51,32 @@ export default function FolderTree() {
   const isEmpty = rootFolders.length === 0 && rootNotes.length === 0;
 
   const onDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes(NOTE_DND_MIME)) {
+    // 同时接受记事和文件夹拖拽
+    if (
+      e.dataTransfer.types.includes(NOTE_DND_MIME) ||
+      e.dataTransfer.types.includes(FOLDER_DND_MIME)
+    ) {
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
     }
   };
 
   const onDrop = async (e: React.DragEvent) => {
+    // 先尝试文件夹拖拽（拖到根空白处 = 移回根级）
+    const folderId = e.dataTransfer.getData(FOLDER_DND_MIME);
+    if (folderId) {
+      const f = useFolderStore.getState().folders.find((x) => x.id === folderId);
+      if (!f || f.parent_id == null) return; // 已在根目录无需移动
+      try {
+        const updated = await moveFolder(folderId, null);
+        if (updated) toast.success('已移回根目录');
+        else toast.error('移动失败');
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : '移动失败');
+      }
+      return;
+    }
+    // 再尝试记事拖拽
     const noteId = e.dataTransfer.getData(NOTE_DND_MIME);
     if (!noteId) return;
     const note = useNoteStore.getState().notes.find((n) => n.id === noteId);

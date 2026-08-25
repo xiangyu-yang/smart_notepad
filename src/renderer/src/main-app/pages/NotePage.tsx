@@ -1,14 +1,17 @@
-import { useEffect, useState, useCallback, useRef, lazy, Suspense } from 'react';
+import { useEffect, useState, useCallback, useRef, lazy, Suspense, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { router } from '../App';
 import { useNoteStore } from '../stores/useNoteStore';
 import { useEditorStore } from '../stores/useEditorStore';
 import { useUiStore } from '../stores/useUiStore';
 import { useSettingsStore } from '../stores/useSettingsStore';
+import { useAttachmentStore } from '../stores/useAttachmentStore';
 import { useToast } from '../hooks/useToast';
 import IconButton from '../components/IconButton';
+import { AttachmentCard } from '../components/AttachmentCard';
 import { formatShortDateTime } from '../utils/format-time';
 
 const AiPanel = lazy(() => import('../components/AiPanel'));
@@ -22,6 +25,162 @@ export default function NotePage() {
   const loadOne = useNoteStore((s) => s.loadOne);
   const saveNote = useNoteStore((s) => s.save);
   const setCurrentId = useNoteStore((s) => s.setCurrentId);
+
+  // --- 附件：状态 + 加载 ---
+  const attachmentsById = useAttachmentStore((s) => s.byNoteId);
+  const attachmentsLoading = useAttachmentStore((s) => s.loadingNoteId);
+  const uploading = useAttachmentStore((s) => s.uploading);
+  const setAttachmentsForNote = useAttachmentStore((s) => s.setAttachmentsForNote);
+  const addAttachment = useAttachmentStore((s) => s.addAttachment);
+  const setLoadingNoteId = useAttachmentStore((s) => s.setLoadingNoteId);
+  const setUploading = useAttachmentStore((s) => s.setUploading);
+  const attachments = useMemo(
+    () => (id ? attachmentsById[id] ?? [] : []),
+    [attachmentsById, id]
+  );
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  // 切换记事时加载附件列表
+  useEffect(() => {
+    if (!id) return;
+    let alive = true;
+    setLoadingNoteId(id);
+    (async () => {
+      try {
+        const list = await window.api['attachments.list'](id);
+        if (alive) setAttachmentsForNote(id, list);
+      } catch (e) {
+        console.error('[NotePage] load attachments error:', e);
+      } finally {
+        if (alive) setLoadingNoteId(null);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [id, setAttachmentsForNote, setLoadingNoteId]);
+
+  /**
+   * 上传一个或多个 File。
+   * Electron contextBridge 不支持 File 对象直接传输，
+   * 这里逐个用 FileReader 读成 base64 dataURL 再发送。
+   * 为避免过大文件阻塞 IPC，单文件上限 512MB。
+   *
+   * 前置条件：记事必须已持久化到 DB。若 URL 上有 id 但未 save 过
+   * （AttachmentRepository.create 会 reject 'note not found'），
+   * 这里先执行一次 saveNote 再上传，避免"新建记事直接上传附件"场景失败。
+   */
+  const uploadFiles = useCallback(
+    async (files: FileList | File[]) => {
+      if (!id) {
+        toast.error('请先创建记事再上传附件');
+        return;
+      }
+      const list = Array.from(files);
+      if (list.length === 0) return;
+      // 超大文件直接拒绝，避免浏览器 OOM / IPC 超时
+      const MAX_BYTES = 512 * 1024 * 1024;
+      for (const f of list) {
+        if (f.size > MAX_BYTES) {
+          toast.error(`文件「${f.name}」超过 512MB 上限`);
+          return;
+        }
+      }
+
+      // 先确保记事在 DB 中存在（避免新建记事直接上传报 'note not found'）
+      try {
+        const current = await window.api['notes.get'](id);
+        if (!current) {
+          // 注意：uploadFiles 在声明时 editorTitle/editorContent 尚未 declare，
+          // 用 useEditorStore.getState() 在运行时取值，避免 TDZ 报错。
+          const { title, content } = useEditorStore.getState();
+          const saved = await saveNote(id, {
+            title,
+            content
+          });
+          useEditorStore.getState().markSaved(saved);
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '未知错误';
+        toast.error(`保存记事失败，无法上传：${msg}`);
+        return;
+      }
+
+      setUploading(true);
+      try {
+        for (const f of list) {
+          const base64: string = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(reader.error ?? new Error('FileReader 读取失败'));
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(f);
+          });
+          const att = await window.api['attachments.upload']({
+            noteId: id,
+            originalName: f.name,
+            mimeType: f.type || '',
+            base64
+          });
+          addAttachment(id, att);
+        }
+        toast.success(
+          list.length === 1
+            ? `已上传：${list[0].name}`
+            : `已上传 ${list.length} 个文件`
+        );
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : '未知错误';
+        console.error('[NotePage] upload error:', e);
+        // 对常见已知错误给出更友好的提示
+        if (msg.includes('no such table: attachments')) {
+          toast.error('附件表尚未初始化，请重启应用后重试（主进程代码需重启生效）');
+        } else if (msg === 'note not found') {
+          toast.error('记事不存在，请先保存记事');
+        } else {
+          toast.error(`上传失败：${msg}`);
+        }
+      } finally {
+        setUploading(false);
+      }
+    },
+    [id, saveNote, addAttachment, setUploading, toast]
+  );
+
+  const onPickFiles = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const onFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (e.target.files && e.target.files.length > 0) uploadFiles(e.target.files);
+      // 清空：再次选择同一文件时仍会触发 change
+      e.target.value = '';
+    },
+    [uploadFiles]
+  );
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setDragOver(false);
+      const items = e.dataTransfer.items;
+      const files: File[] = [];
+      if (items && items.length > 0) {
+        for (let i = 0; i < items.length; i++) {
+          const f = items[i].kind === 'file' ? items[i].getAsFile() : null;
+          if (f) files.push(f);
+        }
+      } else if (e.dataTransfer.files.length > 0) {
+        for (let i = 0; i < e.dataTransfer.files.length; i++) {
+          files.push(e.dataTransfer.files[i]);
+        }
+      }
+      if (files.length > 0) uploadFiles(files);
+    },
+    [uploadFiles]
+  );
 
   const editorTitle = useEditorStore((s) => s.title);
   const editorContent = useEditorStore((s) => s.content);
@@ -279,8 +438,49 @@ export default function NotePage() {
     setViewMode((m) => (m === 'edit' ? 'preview' : m === 'preview' ? 'split' : 'edit'));
   };
 
+  const [exportingPdf, setExportingPdf] = useState(false);
+  const handleExportPdf = async () => {
+    // 先保存未保存的修改，使导出的 PDF 与用户当前看到的预览一致
+    if (editorDirty && id) {
+      try {
+        const saved = await saveNote(id, {
+          title: editorTitle,
+          content: editorContent
+        });
+        markSaved(saved);
+      } catch {
+        // 保存失败也继续导出，不要阻塞
+      }
+    }
+    setExportingPdf(true);
+    try {
+      // 把 Markdown 渲染成 HTML 字符串（与预览完全一致），传给主进程在独立 print 窗口内排版
+      // 主进程创建隐藏 BrowserWindow 加载该 HTML，printToPDF 得到纯净 PDF（只含笔记文本，不含应用 UI）
+      const innerHtml = renderToStaticMarkup(
+        <ReactMarkdown remarkPlugins={[remarkGfm]}>{editorContent || ''}</ReactMarkdown>
+      );
+      const result = await window.api['notes.exportPdf']({
+        defaultName: editorTitle?.trim() || '未命名记事',
+        html: innerHtml
+      });
+      if (result.canceled) return;
+      if (result.success && result.path) {
+        toast.success(`已导出 PDF：${result.path.split(/[/\\]/).pop()}`);
+      } else {
+        toast.error(result.error ? `导出 PDF 失败：${result.error}` : '导出 PDF 失败');
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : '未知错误';
+      console.error('[NotePage] export PDF error:', e);
+      toast.error(`导出 PDF 失败：${msg}`);
+    } finally {
+      setExportingPdf(false);
+    }
+  };
+
   const viewLabel =
     viewMode === 'edit' ? '✏️ 编辑' : viewMode === 'preview' ? '👁 预览' : '⇔ 分栏';
+  const showPdfButton = viewMode === 'preview' || viewMode === 'split';
 
   if (loading && !notFound) {
     return (
@@ -345,6 +545,22 @@ export default function NotePage() {
           >
             {viewLabel}
           </button>
+          {showPdfButton && (
+            <button
+              onClick={handleExportPdf}
+              disabled={exportingPdf}
+              title="下载为 PDF"
+              className={[
+                'no-drag h-8 px-3 rounded-lg text-sm font-medium flex items-center gap-1.5',
+                'transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]',
+                exportingPdf
+                  ? 'bg-paper-200 text-ink-400 cursor-not-allowed'
+                  : 'text-ink-600 bg-paper-100 hover:bg-sage-100 hover:text-sage-700'
+              ].join(' ')}
+            >
+              {exportingPdf ? '⏳ 导出中…' : '📄 下载 PDF'}
+            </button>
+          )}
           <IconButton
             size="sm"
             variant={showAiPanel ? 'soft' : 'ghost'}
@@ -475,6 +691,98 @@ export default function NotePage() {
             </Suspense>
           )}
         </div>
+      </div>
+
+      {/* 附件区：上传入口 + 附件列表（卡片式） */}
+      <div
+        className={[
+          'shrink-0 border-t border-paper-200/80 bg-paper-50/60',
+          'px-6 py-4 transition-colors duration-150',
+          dragOver ? 'bg-sage-50/60' : ''
+        ].join(' ')}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (!dragOver) setDragOver(true);
+        }}
+        onDragLeave={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          if (e.currentTarget === e.target) setDragOver(false);
+        }}
+        onDrop={handleDrop}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={onFileInputChange}
+        />
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <div className="flex items-center gap-2">
+            <div className="text-[13px] font-semibold text-ink-700">
+              📎 附件
+              <span className="ml-2 text-[11px] font-normal text-ink-400">
+                {attachments.length > 0
+                  ? `${attachments.length} 个文件`
+                  : '暂无'}
+              </span>
+            </div>
+            {uploading && (
+              <div className="text-[11px] text-sage-600 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-sage-500 animate-pulseGlow" />
+                上传中…
+              </div>
+            )}
+            {attachmentsLoading === id && !uploading && (
+              <div className="text-[11px] text-ink-400">加载中…</div>
+            )}
+          </div>
+          <button
+            onClick={onPickFiles}
+            disabled={uploading || !id}
+            className={[
+              'h-8 px-3 rounded-lg text-[12px] font-medium flex items-center gap-1.5',
+              'transition-all duration-150 hover:scale-[1.02] active:scale-[0.98]',
+              uploading || !id
+                ? 'bg-paper-200 text-ink-400 cursor-not-allowed'
+                : 'bg-paper-100 hover:bg-sage-100 text-ink-700 hover:text-sage-700'
+            ].join(' ')}
+            title="从本地选择文件添加附件"
+          >
+            ➕ 上传文件
+          </button>
+        </div>
+
+        {/* 拖拽提示覆盖层 */}
+        {dragOver && (
+          <div className="mb-3 border-2 border-dashed border-sage-400 rounded-xl px-4 py-6 text-center text-sage-700 text-[13px] bg-sage-50/70 animate-pulse">
+            松开即可上传文件
+          </div>
+        )}
+
+        {attachments.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {attachments.map((a) => (
+              <AttachmentCard key={a.id} noteId={id!} attachment={a} />
+            ))}
+          </div>
+        )}
+
+        {!dragOver && attachments.length === 0 && (
+          <div
+            className="border-2 border-dashed border-paper-200 hover:border-paper-300 rounded-xl px-4 py-6 text-center cursor-pointer transition-colors duration-150"
+            onClick={onPickFiles}
+            title="点击或拖拽文件到这里上传"
+          >
+            <div className="text-ink-400 text-[13px]">
+              <span className="font-medium text-ink-500">点击选择文件</span> 或
+              拖拽文件到此处上传
+            </div>
+            <div className="text-[11px] text-ink-300 mt-1">单文件上限 512MB</div>
+          </div>
+        )}
       </div>
     </div>
   );

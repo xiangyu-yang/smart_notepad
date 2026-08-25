@@ -8,6 +8,7 @@ import type {
   IpcApi,
   Note,
   Folder,
+  Attachment,
   SettingsKey,
   SettingsMap,
   WindowApi,
@@ -27,12 +28,29 @@ const ipcApi: IpcApi = {
   'notes.delete': (id) => invoke(IPC_CHANNELS.NOTES_DELETE, id),
   'notes.move': (noteId, folderId) =>
     invoke<Note | null>(IPC_CHANNELS.NOTES_MOVE, noteId, folderId),
+  [IPC_CHANNELS.NOTES_EXPORT_PDF]: (payload) =>
+    invoke<{ success: boolean; canceled: boolean; path?: string; error?: string }>(
+      IPC_CHANNELS.NOTES_EXPORT_PDF,
+      payload
+    ),
   'folders.list': () => invoke<Folder[]>(IPC_CHANNELS.FOLDERS_LIST),
   'folders.create': (input) => invoke<Folder>(IPC_CHANNELS.FOLDERS_CREATE, input),
   'folders.rename': (id, name) =>
     invoke<Folder | null>(IPC_CHANNELS.FOLDERS_RENAME, id, name),
   'folders.delete': (id) =>
     invoke<{ deletedNoteCount: number }>(IPC_CHANNELS.FOLDERS_DELETE, id),
+  'folders.move': (id, newParentId) =>
+    invoke<Folder | null>(IPC_CHANNELS.FOLDERS_MOVE, id, newParentId),
+  'attachments.list': (noteId) => invoke<Attachment[]>(IPC_CHANNELS.ATTACHMENTS_LIST, noteId),
+  'attachments.upload': (input) => invoke<Attachment>(IPC_CHANNELS.ATTACHMENTS_UPLOAD, input),
+  'attachments.get': (id) =>
+    invoke<{ attachment: Attachment; base64: string }>(IPC_CHANNELS.ATTACHMENTS_GET, id),
+  'attachments.download': (id) =>
+    invoke<{ success: boolean; canceled: boolean; path?: string; error?: string }>(
+      IPC_CHANNELS.ATTACHMENTS_DOWNLOAD,
+      id
+    ),
+  'attachments.delete': (id) => invoke<boolean>(IPC_CHANNELS.ATTACHMENTS_DELETE, id),
   'settings.get': <K extends SettingsKey>(key: K) =>
     invoke<SettingsMap[K] | undefined>(IPC_CHANNELS.SETTINGS_GET, key),
   'settings.set': <K extends SettingsKey>(key: K, value: SettingsMap[K]) =>
