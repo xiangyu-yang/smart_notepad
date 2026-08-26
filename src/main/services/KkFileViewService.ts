@@ -243,21 +243,28 @@ export class KkFileViewService {
     switch (state) {
       case 'running': {
         const volumeOk = await this.containerHasAttachmentsVolume(cid);
-        if (!volumeOk) {
-          // volume 配置不对，需要重建
-          console.log(
-            `[KkFileViewService] 现有 kkfileview 容器 volume 配置不对，即将重建（附件文件保留在宿主机 ${getAttachmentsStorageRoot()}，不会丢失）...`
-          );
-          try {
-            await exec(`docker rm -f ${cid}`, { timeout: 20000 });
-          } catch (e) {
-            throw new Error(`移除旧 kkFileView 容器失败：${e instanceof Error ? e.message : String(e)}`);
-          }
-          await this.startOrCreateContainer(port);
+        const hasOldTrustEnv = await this.containerHasOldTrustEnv(cid);
+
+        if (volumeOk && !hasOldTrustEnv) {
+          // 配置正确，仅检查 trust 配置是否已修补
+          await this.ensureTrustConfigPatched();
           return;
         }
-        // volume 正确，检查 trust 配置是否已修补
-        await this.ensureTrustConfigPatched();
+
+        // 配置不对 → 重建
+        const reasons: string[] = [];
+        if (!volumeOk) reasons.push('volume 配置不对');
+        if (hasOldTrustEnv) reasons.push('容器含旧 KK_TRUST_HOST 环境变量');
+        console.log(
+          `[KkFileViewService] 现有 kkfileview 容器需要重建（${reasons.join(' + ')}），` +
+          `附件文件保留在宿主机 ${getAttachmentsStorageRoot()}，不会丢失...`
+        );
+        try {
+          await exec(`docker rm -f ${cid}`, { timeout: 20000 });
+        } catch (e) {
+          throw new Error(`移除旧 kkFileView 容器失败：${e instanceof Error ? e.message : String(e)}`);
+        }
+        await this.startOrCreateContainer(port);
         return;
       }
       case 'exited':
@@ -270,12 +277,16 @@ export class KkFileViewService {
         } catch (e) {
           throw new Error(`docker start 失败：${e instanceof Error ? e.message : String(e)}`);
         }
-        // 等待容器进入 running 状态后检查 volume
+        // 等待容器进入 running 状态后检查配置
         await this.sleep(2000);
         const v = await this.containerHasAttachmentsVolume(cid);
-        if (!v) {
+        const t = await this.containerHasOldTrustEnv(cid);
+        if (!v || t) {
+          const reasons: string[] = [];
+          if (!v) reasons.push('volume 配置不对');
+          if (t) reasons.push('容器含旧 KK_TRUST_HOST 环境变量');
           console.log(
-            `[KkFileViewService] 重启后的 kkfileview 容器 volume 配置不对，正在重建...`
+            `[KkFileViewService] 重启后的 kkfileview 容器需要重建（${reasons.join(' + ')}），正在重建...`
           );
           try {
             await exec(`docker rm -f ${cid}`, { timeout: 20000 });
@@ -321,6 +332,25 @@ export class KkFileViewService {
   }
 
   /**
+   * 检查容器是否包含旧的 KK_TRUST_HOST 环境变量（需要重建容器）。
+   * 旧容器用 -e KK_TRUST_HOST=* 创建，该环境变量无法通过 restart 移除，
+   * 会导致 application.properties 中 trust.host 被 Spring 注入值，
+   * 即使 sed 删除后，下次启动仍会被 ${KK_TRUST_HOST:default} 占位符重新写入。
+   */
+  private static async containerHasOldTrustEnv(cid: string): Promise<boolean> {
+    try {
+      const { stdout } = await exec(
+        `docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' ${cid}`,
+        { timeout: 10000 }
+      );
+      const entries = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+      return entries.some((e) => e.startsWith('KK_TRUST_HOST='));
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * 修补容器内 trust 配置：删除 application.properties 中非注释的 trust.host / trust.dir 行。
    *
    * 根源（反编译 TrustHostFilter 字节码确认）：
@@ -333,31 +363,55 @@ export class KkFileViewService {
    * 所以必须删除 trust.host 行，让 trustHostSet 为空 → isEmpty() 为 true → 放行所有请求（含 file://）。
    *
    * 幂等：如果 trust.host 行已不存在（已修补过），直接返回不重启。
+   *
+   * 注意：调用前必须确保容器已经存在且在运行中。
    */
   private static async ensureTrustConfigPatched(): Promise<void> {
     const propsPath = '/opt/kkFileView-4.1.0/config/application.properties';
 
     // 1. 检查是否还有非注释的 trust.host / trust.dir 行
-    //    grep -c 在无匹配时退出码为 1，exec 会抛错，用 try/catch 捕获
-    let needsPatch = false;
+    //    使用 grep -E (扩展正则) 支持 [[:space:]] 字符类
+    //    exit code 0 = 有匹配, 1 = 无匹配, >1 = 真实错误
+    let hasTrustHost = false;
+    let hasTrustDir = false;
     try {
       const { stdout } = await exec(
-        `docker exec ${KKFILEVIEW_CONTAINER_NAME} grep -c '^trust\\.host\\s*=\\|^trust\\.dir\\s*=' ${propsPath}`,
+        `docker exec ${KKFILEVIEW_CONTAINER_NAME} grep -cE '^trust\\.host[[:space:]]*=' ${propsPath}`,
         { timeout: 10000 }
       );
-      needsPatch = parseInt(stdout.trim(), 10) > 0;
+      hasTrustHost = parseInt(stdout.trim(), 10) > 0;
     } catch {
-      // grep 无匹配退出码 1 → 已修补，无需操作
+      // grep 无匹配退出码 1 → 该行不存在
+    }
+    try {
+      const { stdout } = await exec(
+        `docker exec ${KKFILEVIEW_CONTAINER_NAME} grep -cE '^trust\\.dir[[:space:]]*=' ${propsPath}`,
+        { timeout: 10000 }
+      );
+      hasTrustDir = parseInt(stdout.trim(), 10) > 0;
+    } catch {
+      // 无匹配
     }
 
-    if (!needsPatch) return;
+    if (!hasTrustHost && !hasTrustDir) {
+      console.log('[KkFileViewService] trust 配置已修补（trust.host/trust.dir 行均不存在），无需操作');
+      return;
+    }
 
-    console.log('[KkFileViewService] 检测到 application.properties 中仍有 trust.host/trust.dir 行，正在删除并重启容器...');
+    console.log(
+      `[KkFileViewService] 检测到 application.properties 中仍有 trust 配置行 ` +
+      `(trust.host=${hasTrustHost ? '存在' : '不存在'}, trust.dir=${hasTrustDir ? '存在' : '不存在'})，` +
+      `正在删除并重启容器...`
+    );
 
-    // 2. 删除 trust.host 和 trust.dir 行
+    // 2. 删除 trust.host 和 trust.dir 行（用两条独立 sed，兼容性更好）
     try {
       await exec(
-        `docker exec ${KKFILEVIEW_CONTAINER_NAME} sed -i '/^trust\\.host\\s*=/d; /^trust\\.dir\\s*=/d' ${propsPath}`,
+        `docker exec ${KKFILEVIEW_CONTAINER_NAME} sed -i '/^trust\\.host[[:space:]]*=/d' ${propsPath}`,
+        { timeout: 15000 }
+      );
+      await exec(
+        `docker exec ${KKFILEVIEW_CONTAINER_NAME} sed -i '/^trust\\.dir[[:space:]]*=/d' ${propsPath}`,
         { timeout: 15000 }
       );
     } catch (e) {
@@ -368,14 +422,34 @@ export class KkFileViewService {
       );
     }
 
-    // 3. 重启容器让配置生效
+    // 3. 验证删除结果
+    let remainingLines = 0;
+    try {
+      const { stdout } = await exec(
+        `docker exec ${KKFILEVIEW_CONTAINER_NAME} grep -cE '^trust\\.(host|dir)[[:space:]]*=' ${propsPath}`,
+        { timeout: 10000 }
+      );
+      remainingLines = parseInt(stdout.trim(), 10);
+    } catch {
+      // 无匹配 → 成功
+    }
+    if (remainingLines > 0) {
+      console.warn('[KkFileViewService] sed 删除后仍有 trust 行，尝试备用匹配方式...');
+      // 备用：匹配所有以 trust.host/trust.dir 开头的行（不限定 = 号）
+      await exec(
+        `docker exec ${KKFILEVIEW_CONTAINER_NAME} sed -i '/^trust\\.host/d; /^trust\\.dir/d' ${propsPath}`,
+        { timeout: 15000 }
+      );
+    }
+
+    // 4. 重启容器让配置生效
     try {
       await exec(`docker restart ${KKFILEVIEW_CONTAINER_NAME}`, { timeout: 30000 });
     } catch (e) {
       throw new Error(`重启 kkFileView 容器失败：${e instanceof Error ? e.message : String(e)}`);
     }
 
-    // 4. 等待容器重启后 Docker 层面就绪（Spring 启动交给健康检查处理）
+    // 5. 等待容器重启后 Docker 层面就绪（Spring 启动交给健康检查处理）
     await this.sleep(3000);
     console.log('[KkFileViewService] trust 配置已修补，容器已重启，等待健康检查...');
   }
