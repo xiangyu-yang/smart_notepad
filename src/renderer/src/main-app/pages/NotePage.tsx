@@ -41,6 +41,22 @@ export default function NotePage() {
   );
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  // 附件栏折叠状态：≥2 个附件时默认折叠
+  const [attachmentsCollapsed, setAttachmentsCollapsed] = useState(false);
+
+  // 附件栏折叠：≥2 个附件时默认折叠；切换记事时重置
+  useEffect(() => {
+    if (!id) return;
+    setAttachmentsCollapsed(false);
+  }, [id]);
+
+  useEffect(() => {
+    if (attachments.length >= 2) {
+      setAttachmentsCollapsed(true);
+    } else {
+      setAttachmentsCollapsed(false);
+    }
+  }, [attachments.length]);
 
   // 切换记事时加载附件列表
   useEffect(() => {
@@ -766,10 +782,33 @@ export default function NotePage() {
         )}
 
         {attachments.length > 0 && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {attachments.map((a) => (
-              <AttachmentCard key={a.id} noteId={id!} attachment={a} />
-            ))}
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-2">
+              <div className="text-[13px] text-ink-500">
+                {attachments.length} 个文件
+                {attachmentsCollapsed && attachments.length > 1 ? `（已折叠）` : ''}
+              </div>
+              {attachments.length > 1 && (
+                <button
+                  onClick={() => setAttachmentsCollapsed(!attachmentsCollapsed)}
+                  className="h-6 px-2 rounded-md text-[11px] text-ink-500 hover:text-ink-700 hover:bg-paper-100 transition-colors flex items-center gap-1"
+                  title={attachmentsCollapsed ? '展开全部' : '折叠'}
+                >
+                  {attachmentsCollapsed ? '▾ 展开' : '▴ 折叠'}
+                </button>
+              )}
+            </div>
+            <div
+              className="grid grid-cols-1 sm:grid-cols-2 gap-2.5"
+              style={{
+                maxHeight: attachmentsCollapsed && attachments.length > 1 ? '52px' : 'none',
+                overflow: attachmentsCollapsed && attachments.length > 1 ? 'hidden' : 'visible'
+              }}
+            >
+              {attachments.map((a) => (
+                <AttachmentCard key={a.id} noteId={id!} attachment={a} />
+              ))}
+            </div>
           </div>
         )}
 

@@ -20,13 +20,11 @@ export function AttachmentPreview() {
   const [base64, setBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [textError, setTextError] = useState(false);
-  const [docxHtml, setDocxHtml] = useState<string | null>(null);
-  const [docxError, setDocxError] = useState(false);
-  // kkFileView 在线预览
+  // kkFileView 在线预览（office 类型自动触发）
   const [kkLoading, setKkLoading] = useState(false);
   const [kkPreviewUrl, setKkPreviewUrl] = useState<string | null>(null);
 
-  // 扩展名优先的分派 + 派生 MIME，修复 File.type 为空时 PDF iframe 无法启动 Viewer
+  // 扩展名优先的分派 + 派生 MIME
   const { kind, effectiveMime } = useMemo(() => {
     if (!attachment) return { kind: 'unsupported' as PreviewKind, effectiveMime: '' };
     const k = pickPreviewKind(attachment.mime_type, attachment.original_name);
@@ -36,13 +34,12 @@ export function AttachmentPreview() {
     };
   }, [attachment]);
 
+  // 加载文件内容
   useEffect(() => {
     if (!visible || !attachment) {
       setBase64(null);
       setLoading(false);
       setTextError(false);
-      setDocxHtml(null);
-      setDocxError(false);
       setKkLoading(false);
       setKkPreviewUrl(null);
       return;
@@ -50,8 +47,6 @@ export function AttachmentPreview() {
     setLoading(true);
     setBase64(null);
     setTextError(false);
-    setDocxHtml(null);
-    setDocxError(false);
     setKkLoading(false);
     setKkPreviewUrl(null);
     (async () => {
@@ -67,6 +62,15 @@ export function AttachmentPreview() {
       }
     })();
   }, [visible, attachment?.id, toast]);
+
+  // Office 类型自动触发 kkFileView 预览
+  useEffect(() => {
+    if (kind !== 'office' || !visible || !attachment) return;
+    // 已经在加载/预览中就不重复触发
+    if (kkLoading || kkPreviewUrl) return;
+    handleTryKkView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, visible, attachment?.id]);
 
   const blobUrl = useMemo(() => {
     if (!base64) return null;
@@ -85,7 +89,6 @@ export function AttachmentPreview() {
     }
   }, [base64, effectiveMime, toast]);
 
-  // 卸载时释放
   useEffect(() => {
     return () => {
       if (blobUrl) URL.revokeObjectURL(blobUrl);
@@ -109,39 +112,6 @@ export function AttachmentPreview() {
       return null;
     }
   }, [base64, kind]);
-
-  // Word 文档（.docx）用 mammoth 转 HTML 预览
-  // mammoth 体积较大（~500KB），用 dynamic import 仅在需要时加载，不影响首屏
-  useEffect(() => {
-    if (kind !== 'docx' || !base64) {
-      setDocxHtml(null);
-      setDocxError(false);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        // mammoth 内部使用全局 Buffer，浏览器端默认无，需手动 polyfill（按需加载，不污染其他场景）
-        const g = globalThis as { Buffer?: unknown };
-        if (typeof g.Buffer === 'undefined') {
-          const { Buffer } = await import('buffer');
-          g.Buffer = Buffer;
-        }
-        const mammoth = await import('mammoth');
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const result = await mammoth.convertToHtml({ arrayBuffer: bytes.buffer });
-        if (!cancelled) setDocxHtml(result.value);
-      } catch (e) {
-        console.error('[AttachmentPreview] docx convert error:', e);
-        if (!cancelled) setDocxError(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [kind, base64]);
 
   const handleDownload = async () => {
     if (!attachment) return;
@@ -231,21 +201,55 @@ export function AttachmentPreview() {
     ) : (
       <div className="flex items-center justify-center h-full text-ink-400">加载中…</div>
     );
-  } else if (kind === 'docx') {
-    body = docxError ? (
-      <div className="flex items-center justify-center h-full text-ink-400">
-        Word 文档解析失败，可点击右上角「下载」后用 Office 打开
+  } else if (kind === 'office') {
+    // Office 类型：Word/Excel/PPT 等统一用 kkFileView 预览
+    body = kkLoading ? (
+      <div className="flex flex-col items-center justify-center h-full text-ink-400 gap-3">
+        <div className="w-8 h-8 border-2 border-sage-500 border-t-transparent rounded-full animate-spin" />
+        <div className="text-[13px]">正在启动 kkFileView 预览服务…</div>
       </div>
-    ) : docxHtml != null ? (
-      <div
-        className="w-full h-full overflow-auto bg-white border border-paper-200 rounded-lg p-6 prose prose-note text-[14px] leading-7 select-text"
-        dangerouslySetInnerHTML={{ __html: docxHtml }}
+    ) : kkPreviewUrl ? (
+      <iframe
+        title={`kkFileView 预览 - ${attachment.original_name}`}
+        src={kkPreviewUrl}
+        className="w-full h-full border-0 rounded-lg bg-white shadow-inner"
       />
     ) : (
-      <div className="flex items-center justify-center h-full text-ink-400">解析中…</div>
+      <div className="flex flex-col items-center justify-center h-full text-ink-500 gap-4">
+        <div className="text-4xl">📄</div>
+        <div className="text-center max-w-[400px]">
+          <div className="font-medium text-ink-700 mb-1">
+            {attachment.original_name}
+          </div>
+          <div className="text-[12px] text-ink-400 mb-3">
+            {effectiveMime} · {formatSize(attachment.size)}
+          </div>
+          <div className="text-[13px] mb-4">kkFileView 预览启动失败，可选择以下方式打开：</div>
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            <button
+              onClick={handleOpenDefaultApp}
+              className="h-9 px-4 rounded-lg text-sm font-medium text-white bg-sage-600 hover:bg-sage-700 transition-all duration-150"
+            >
+              🚀 用本地应用打开
+            </button>
+            <button
+              onClick={handleTryKkView}
+              className="h-9 px-4 rounded-lg text-sm font-medium text-ink-700 bg-paper-100 hover:bg-paper-200 transition-all duration-150"
+            >
+              👁️ 重试在线预览
+            </button>
+            <button
+              onClick={handleDownload}
+              className="h-9 px-4 rounded-lg text-sm font-medium text-ink-700 border border-paper-200 bg-white hover:bg-paper-100 transition-all duration-150"
+            >
+              ⬇ 下载到本地
+            </button>
+          </div>
+        </div>
+      </div>
     );
   } else if (kkPreviewUrl) {
-    // ---- kkFileView 在线预览：iframe 嵌入 kkFileView 的 onlinePreview 页面 ----
+    // 其他类型：kkFileView 在线预览（用户手动点击触发）
     body = (
       <iframe
         title={`kkFileView 预览 - ${attachment.original_name}`}
@@ -254,7 +258,7 @@ export function AttachmentPreview() {
       />
     );
   } else {
-    // ---- unsupported 初始状态：提供 3 种操作 ----
+    // unsupported 初始状态：提供 3 种操作
     body = (
       <div className="flex flex-col items-center justify-center h-full text-ink-500 gap-4">
         <div className="text-5xl">📄</div>
@@ -298,6 +302,12 @@ export function AttachmentPreview() {
     );
   }
 
+  const kindIcon =
+    kind === 'image' ? '🖼️' :
+    kind === 'pdf' ? '📕' :
+    kind === 'text' ? '📝' :
+    kind === 'office' ? '📘' : '📎';
+
   return (
     <div
       className="fixed inset-0 z-[80] flex items-center justify-center"
@@ -309,9 +319,7 @@ export function AttachmentPreview() {
       <div className="relative z-10 w-[86%] h-[82%] bg-paper-50 rounded-2xl shadow-2xl flex flex-col animate-[dialogIn_0.18s_ease-out]">
         <div className="flex items-center justify-between px-6 py-4 border-b border-paper-200 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="text-2xl">
-              {kind === 'image' ? '🖼️' : kind === 'pdf' ? '📕' : kind === 'text' ? '📝' : kind === 'docx' ? '📄' : '📎'}
-            </div>
+            <div className="text-2xl">{kindIcon}</div>
             <div className="min-w-0">
               <div className="font-semibold text-[15px] text-ink-800 truncate">
                 {attachment.original_name}

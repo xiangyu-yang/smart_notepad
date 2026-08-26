@@ -6,7 +6,7 @@
  * 定义在这里统一维护，避免两边逻辑漂移。
  */
 
-export type PreviewKind = 'image' | 'pdf' | 'text' | 'docx' | 'unsupported';
+export type PreviewKind = 'image' | 'pdf' | 'text' | 'office' | 'unsupported';
 
 export const IMAGE_EXT = new Set([
   'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'svgz', 'ico', 'tiff', 'tif', 'avif', 'heic', 'heif'
@@ -15,10 +15,18 @@ export const IMAGE_EXT = new Set([
 export const PDF_EXT = new Set(['pdf']);
 
 /**
- * Word OOXML（.docx 系列）扩展名。mammoth.js 仅支持这些格式（本质是 ZIP+XML）。
- * 老格式 .doc 是二进制格式，mammoth 不支持，仍归 unsupported。
+ * Office 文档扩展名集合。
+ * 这些格式统一由 kkFileView（LibreOffice 转 PDF）预览，不再使用 mammoth 等前端解析方案。
+ * 包括：Word（doc/docx 等）、Excel（xls/xlsx 等）、PPT（ppt/pptx 等）、WPS、OpenDocument 等。
  */
-export const DOCX_EXT = new Set(['docx', 'docm', 'dotx', 'dotm']);
+export const OFFICE_EXT = new Set([
+  'doc', 'docx', 'docm', 'dot', 'dotx', 'dotm',
+  'xls', 'xlsx', 'xlt', 'xltx', 'xlsm', 'xltm', 'xlsb',
+  'ppt', 'pptx', 'pot', 'potx', 'pptm', 'potm', 'pps', 'ppsx', 'ppsm',
+  'odt', 'ods', 'odp', 'odg', 'odc', 'odb', 'odf', 'odi', 'odm', 'ott', 'ots', 'otp',
+  'rtf', 'wps', 'et', 'dps',
+  'pages', 'numbers', 'keynote'
+]);
 
 export const TEXT_EXT = new Set([
   'txt', 'md', 'markdown', 'mdown', 'mkd',
@@ -159,7 +167,7 @@ export function pickPreviewKind(mime: string, originalName: string): PreviewKind
   if (ext && IMAGE_EXT.has(ext)) return 'image';
   if (ext && PDF_EXT.has(ext)) return 'pdf';
   if (ext && TEXT_EXT.has(ext)) return 'text';
-  if (ext && DOCX_EXT.has(ext)) return 'docx';
+  if (ext && OFFICE_EXT.has(ext)) return 'office';
   // --- 无扩展名的特殊文件名（Dockerfile / Makefile）---
   if (CODE_NO_DOT.has((originalName || '').toLowerCase())) return 'text';
   // --- 已知二进制格式：扩展名明确是非文本/不可在线预览的，一律 unsupported（无论 mime 写了啥） ---
@@ -187,17 +195,11 @@ export function pickPreviewKind(mime: string, originalName: string): PreviewKind
 
 /**
  * 已知为二进制、不适合用 `<pre>` UTF-8 文本预览的扩展名。
- * 注：docx/xlsx/pptx 本质是 ZIP，扩展名不写这里会被 mime 误判 text 导致乱码。
+ * 注：office 类型（docx/xlsx/pptx 等）已由 OFFICE_EXT 在上层匹配为 'office'，
+ * 不会走到 BINARY_EXT 分支，这里仅保留非 office 的二进制格式。
  */
 export const BINARY_EXT = new Set([
   'zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'xz', 'zst',
-  'doc', 'docx', 'dot', 'dotx', 'docm', 'dotm',
-  'xls', 'xlsx', 'xlt', 'xltx', 'xlsm', 'xltm', 'xlsb',
-  'ppt', 'pptx', 'pot', 'potx', 'pptm', 'potm', 'pps', 'ppsx', 'ppsm',
-  'odt', 'ods', 'odp', 'odg', 'odc', 'odb', 'odf', 'odi', 'odm', 'ott', 'ots', 'otp',
-  'rtf', 'wps', 'et', 'dps',
-  'pages', 'numbers', 'keynote',
-  'pdf', // 扩展名 .pdf 已经在 PDF_EXT 命中，这里只是冗余占位避免被 mime fallback
   'exe', 'msi', 'dll', 'so', 'dylib', 'a', 'o', 'obj', 'lib',
   'apk', 'ipa', 'app', 'dmg', 'pkg', 'deb', 'rpm', 'snap', 'flatpak',
   'class', 'jar', 'war', 'ear', 'jmod',
