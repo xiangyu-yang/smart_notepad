@@ -30,6 +30,8 @@ export interface Attachment {
   size: number;
   created_at: number;
   updated_at: number;
+  /** 文件内容（base64），磁盘文件丢失时可用于重建；仅在需要时从 DB 读取 */
+  data?: string;
 }
 
 export interface SettingsMap {

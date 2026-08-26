@@ -24,22 +24,48 @@ export function getAttachmentsStorageRoot(): string {
 /**
  * 返回附件文件在磁盘上的绝对路径。
  * 会校验：1) 附件在 DB 中必须存在；2) 解析出的真实文件路径必须位于 storageRoot 目录内（防止路径穿越）。
+ * 若磁盘文件不存在但 DB data 列有备份，自动重建文件。
  */
 export function getAttachmentPathOrThrow(id: string): { attachment: Attachment; absolutePath: string } {
   const db = getDb();
-  const attachment = db
-    .prepare('SELECT * FROM attachments WHERE id = ?')
+  // 第一步：只查元数据（不含 data 列，避免加载大文件）
+  const meta = db
+    .prepare(
+      'SELECT id, note_id, file_name, original_name, mime_type, size, created_at, updated_at FROM attachments WHERE id = ?'
+    )
     .get(id) as Attachment | undefined;
-  if (!attachment) throw new Error('attachment not found');
+  if (!meta) throw new Error('attachment not found');
 
   const root = getAttachmentsStorageRoot();
-  const expectedDir = path.join(root, attachment.note_id);
-  const absolutePath = path.resolve(expectedDir, attachment.file_name);
+  const expectedDir = path.join(root, meta.note_id);
+  const absolutePath = path.resolve(expectedDir, meta.file_name);
   const realDir = path.resolve(path.dirname(absolutePath));
   if (realDir !== path.resolve(expectedDir)) {
     throw new Error('attachment path traversal detected');
   }
-  return { attachment, absolutePath };
+
+  // 第二步：如果磁盘文件不存在，查 data 列并重建
+  if (!fs.existsSync(absolutePath)) {
+    const full = db
+      .prepare('SELECT * FROM attachments WHERE id = ?')
+      .get(id) as Attachment | undefined;
+    if (full && full.data) {
+      console.warn(`[getAttachmentPathOrThrow] 磁盘文件丢失，从 DB data 列重建：${meta.file_name}`);
+      if (!fs.existsSync(expectedDir)) {
+        fs.mkdirSync(expectedDir, { recursive: true });
+      }
+      const buffer = Buffer.from(full.data, 'base64');
+      fs.writeFileSync(absolutePath, buffer);
+      // 更新 size 字段
+      db.prepare('UPDATE attachments SET size = ?, updated_at = ? WHERE id = ?')
+        .run(buffer.length, Date.now(), id);
+      return { attachment: full, absolutePath };
+    }
+    // 文件不存在且无 data 备份
+    throw new Error(`附件文件不存在且无 DB 备份：${meta.file_name}，请重新上传`);
+  }
+
+  return { attachment: meta, absolutePath };
 }
 
 /**
@@ -49,18 +75,23 @@ export function getAttachmentPathOrThrow(id: string): { attachment: Attachment; 
  * 我们在 NoteRepository.remove 中显式收集附件并清理磁盘文件。
  */
 export class AttachmentRepository {
-  /** 列出一篇记事下所有附件 */
+  /** 列出一篇记事下所有附件（不含 data 列，避免加载大文件数据） */
   static listByNote(noteId: string): Attachment[] {
     const db = getDb();
     return db
-      .prepare('SELECT * FROM attachments WHERE note_id = ? ORDER BY created_at ASC')
+      .prepare(
+        'SELECT id, note_id, file_name, original_name, mime_type, size, created_at, updated_at FROM attachments WHERE note_id = ? ORDER BY created_at ASC'
+      )
       .all(noteId) as Attachment[];
   }
 
+  /** 获取单个附件元数据（不含 data 列） */
   static get(id: string): Attachment | null {
     const db = getDb();
     return (
-      (db.prepare('SELECT * FROM attachments WHERE id = ?').get(id) as Attachment | undefined) ?? null
+      (db.prepare(
+        'SELECT id, note_id, file_name, original_name, mime_type, size, created_at, updated_at FROM attachments WHERE id = ?'
+      ).get(id) as Attachment | undefined) ?? null
     );
   }
 
@@ -130,10 +161,11 @@ export class AttachmentRepository {
       throw new Error('attachment empty: no source path nor buffer');
     }
 
-    // 4) 插入 DB
+    // 4) 插入 DB（同时将文件内容 base64 存入 data 列，防止磁盘文件丢失导致预览失效）
     const now = Date.now();
-    // 空 mime 兜底：按扩展名推导一次，保证预览分派可正常工作
     const mime = input.mimeType || deriveMimeFromName(input.originalName);
+    // 读取刚写入的文件内容做 base64 备份
+    const fileData = fs.readFileSync(targetPath).toString('base64');
     const att: Attachment = {
       id,
       note_id: input.noteId,
@@ -146,8 +178,8 @@ export class AttachmentRepository {
     };
     const tx = db.transaction(() => {
       db.prepare(
-        'INSERT INTO attachments (id, note_id, file_name, original_name, mime_type, size, created_at, updated_at) VALUES (@id, @note_id, @file_name, @original_name, @mime_type, @size, @created_at, @updated_at)'
-      ).run(att);
+        'INSERT INTO attachments (id, note_id, file_name, original_name, mime_type, size, created_at, updated_at, data) VALUES (@id, @note_id, @file_name, @original_name, @mime_type, @size, @created_at, @updated_at, @data)'
+      ).run({ ...att, data: fileData });
     });
     tx();
     return att;
