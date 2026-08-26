@@ -70,7 +70,10 @@ export class WindowManager {
 
     // dev 模式下转发渲染进程 console 到主进程终端，便于调试
     if (isDev) {
-      win.webContents.on('console-message', (_e, level, message) => {
+      win.webContents.on('console-message', (_e, level, message, _line, sourceId) => {
+        // 过滤 kkFileView iframe 内部的噪音日志（如 "Knockout groups not supported"）
+        // sourceId 是产生 console 消息的源页面 URL，kkFileView 运行在 http://127.0.0.1:8012
+        if (typeof sourceId === 'string' && sourceId.includes('8012')) return;
         const tag = ['LOG', 'WARN', 'ERROR'][level] || 'LOG';
         // eslint-disable-next-line no-console
         console.log(`[renderer:${tag}]`, message);
