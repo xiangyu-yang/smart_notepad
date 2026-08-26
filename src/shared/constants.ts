@@ -38,7 +38,11 @@ export const IPC_CHANNELS = {
   ATTACHMENTS_UPLOAD: 'attachments.upload',
   ATTACHMENTS_GET: 'attachments.get',
   ATTACHMENTS_DOWNLOAD: 'attachments.download',
-  ATTACHMENTS_DELETE: 'attachments.delete'
+  ATTACHMENTS_DELETE: 'attachments.delete',
+  // 用系统默认应用（PowerPoint/WPS/Keynote 等）打开附件
+  ATTACHMENTS_OPEN_DEFAULT: 'attachments.openDefault',
+  // 通过 kkFileView docker 在线预览：检查并启动容器，返回内嵌预览 URL
+  ATTACHMENTS_PREPARE_KKVIEW: 'attachments.prepareKkView'
 } as const;
 
 export const DB_FILE = 'smart_notepad.db';

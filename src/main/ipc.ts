@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, type SaveDialogOptions } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, type SaveDialogOptions } from 'electron';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/constants';
 import type { ChatSession, Folder, Note, SettingsKey, SettingsMap } from '@shared/types';
@@ -12,6 +12,8 @@ import {
 } from './db/repositories/AttachmentRepository';
 import { WindowManager } from './window/WindowManager';
 import * as OllamaService from './services/OllamaService';
+import { AttachmentFileServer } from './services/AttachmentFileServer';
+import { KkFileViewService, KKFILEVIEW_DEFAULT_PORT } from './services/KkFileViewService';
 
 export function registerIpcHandlers(): void {
   // ---------- notes ----------
@@ -465,6 +467,80 @@ export function registerIpcHandlers(): void {
       return false;
     }
   });
+
+  // ---- 用系统默认应用打开附件 ----
+  // 先把附件 base64 落到临时目录（保留原始文件名），再调 shell.openPath 交给 PowerPoint/WPS/Keynote 等处理。
+  ipcMain.handle(
+    IPC_CHANNELS.ATTACHMENTS_OPEN_DEFAULT,
+    async (
+      _e,
+      id: string
+    ): Promise<{ success: boolean; canceled?: boolean; error?: string }> => {
+      try {
+        const { attachment, absolutePath } = getAttachmentPathOrThrow(id);
+        // getAttachmentPathOrThrow 已负责把附件写到 attachments/ 目录下并返回绝对路径，
+        // 这里直接调用 Electron 的 shell.openPath 打开（由系统决定用什么应用）
+        const openErr = await shell.openPath(absolutePath);
+        if (openErr) {
+          console.error('[ipc] attachments.openDefault shell.openPath error:', openErr);
+          return {
+            success: false,
+            error: `无法打开「${attachment.original_name}」：系统未安装可处理该文件类型的应用，请先安装对应软件`
+          };
+        }
+        return { success: true };
+      } catch (e) {
+        console.error('[ipc] attachments.openDefault error:', e);
+        return {
+          success: false,
+          error: e instanceof Error ? e.message : '打开失败'
+        };
+      }
+    }
+  );
+
+  // ---- kkFileView 在线预览准备 ----
+  // 方案对齐同级项目 nature_and_humanity / chat_assistant_agent：
+  //   1. 容器名固定为 `kkfileview`；不存在就 docker run -d --name kkfileview ... --add-host=host.docker.internal:host-gateway -v <宿主机attachments根>:/opt/smart_notepad_attachments
+  //   2. 不再 docker cp 注入文件：宿主机 attachments/ 目录已直接 volume 映射进容器内的 /opt/smart_notepad_attachments，0 拷贝可读
+  //   3. 传参：file:///opt/smart_notepad_attachments/<note_id>/<uuid>.<ext>  → Buffer.from(...,'utf8').toString('base64') → encodeURIComponent → ?url=
+  //   4. trust 配置：容器创建/启动后自动删除 application.properties 中的 trust.host/trust.dir 行（让 TrustHostSet 为空 → 放行 file://）
+  ipcMain.handle(
+    IPC_CHANNELS.ATTACHMENTS_PREPARE_KKVIEW,
+    async (
+      _e,
+      id: string
+    ): Promise<{ success: boolean; previewUrl?: string; error?: string }> => {
+      try {
+        // 1. kkFileView 健康检查 + 自动 docker daemon 拉起 + 容器创建/启动/旧容器重建
+        const kkPort = await KkFileViewService.ensureReady({ port: KKFILEVIEW_DEFAULT_PORT });
+
+        // 2. 拿宿主机真实磁盘路径（包含路径穿越防御 + note_id 白名单校验）
+        const { attachment, absolutePath: hostAbsolutePath } = getAttachmentPathOrThrow(id);
+
+        // 3. 拼容器内 file:/// URL（基于 volume 映射 /opt/smart_notepad_attachments/...）
+        const containerFileUri = KkFileViewService.hostAttachmentPathToContainerUri(hostAbsolutePath);
+
+        // 4. 组装 onlinePreview URL（和 nature_and_humanity/api/src/routes/rag.ts:L93-L95 完全一致：utf8→base64→encodeURIComponent）
+        const fileUrlBase64 = Buffer.from(containerFileUri, 'utf-8').toString('base64');
+        const previewUrl = `http://127.0.0.1:${kkPort}/onlinePreview?url=${encodeURIComponent(fileUrlBase64)}`;
+        console.log(
+          `[ipc] attachments.prepareKkView id=${id} kkPort=${kkPort} original=${JSON.stringify(attachment.original_name)}\n` +
+          `  -> 宿主机文件:                ${hostAbsolutePath}\n` +
+          `  -> 容器内映射 file:// URL:    ${containerFileUri}\n` +
+          `  -> file:// URL base64:        ${fileUrlBase64}\n` +
+          `  -> iframe 打开的预览 URL:     ${previewUrl}`
+        );
+        return { success: true, previewUrl };
+      } catch (e) {
+        console.error('[ipc] attachments.prepareKkView error:', e);
+        return {
+          success: false,
+          error: e instanceof Error ? e.message : 'kkFileView 启动失败'
+        };
+      }
+    }
+  );
 
   // ---------- settings ----------
   ipcMain.handle(

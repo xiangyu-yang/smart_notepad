@@ -22,6 +22,9 @@ export function AttachmentPreview() {
   const [textError, setTextError] = useState(false);
   const [docxHtml, setDocxHtml] = useState<string | null>(null);
   const [docxError, setDocxError] = useState(false);
+  // kkFileView 在线预览
+  const [kkLoading, setKkLoading] = useState(false);
+  const [kkPreviewUrl, setKkPreviewUrl] = useState<string | null>(null);
 
   // 扩展名优先的分派 + 派生 MIME，修复 File.type 为空时 PDF iframe 无法启动 Viewer
   const { kind, effectiveMime } = useMemo(() => {
@@ -40,6 +43,8 @@ export function AttachmentPreview() {
       setTextError(false);
       setDocxHtml(null);
       setDocxError(false);
+      setKkLoading(false);
+      setKkPreviewUrl(null);
       return;
     }
     setLoading(true);
@@ -47,6 +52,8 @@ export function AttachmentPreview() {
     setTextError(false);
     setDocxHtml(null);
     setDocxError(false);
+    setKkLoading(false);
+    setKkPreviewUrl(null);
     (async () => {
       try {
         const res = await window.api['attachments.get'](attachment.id);
@@ -153,6 +160,39 @@ export function AttachmentPreview() {
     }
   };
 
+  const handleOpenDefaultApp = async () => {
+    if (!attachment) return;
+    try {
+      const r = await window.api['attachments.openDefault'](attachment.id);
+      if (r.success) toast.success(`已启动系统默认应用打开：${attachment.original_name}`);
+      else toast.error(r.error ? `打开失败：${r.error}` : '打开失败');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '未知错误';
+      console.error('[AttachmentPreview] openDefault error:', err);
+      toast.error(`打开失败：${msg}`);
+    }
+  };
+
+  const handleTryKkView = async () => {
+    if (!attachment) return;
+    setKkLoading(true);
+    setKkPreviewUrl(null);
+    try {
+      const r = await window.api['attachments.prepareKkView'](attachment.id);
+      if (r.success && r.previewUrl) {
+        setKkPreviewUrl(r.previewUrl);
+      } else {
+        toast.error(r.error ? `在线预览不可用：${r.error}` : '在线预览不可用');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '未知错误';
+      console.error('[AttachmentPreview] prepareKkView error:', err);
+      toast.error(`在线预览失败：${msg}`);
+    } finally {
+      setKkLoading(false);
+    }
+  };
+
   if (!visible || !attachment) return null;
 
   let body: React.ReactNode;
@@ -204,19 +244,54 @@ export function AttachmentPreview() {
     ) : (
       <div className="flex items-center justify-center h-full text-ink-400">解析中…</div>
     );
+  } else if (kkPreviewUrl) {
+    // ---- kkFileView 在线预览：iframe 嵌入 kkFileView 的 onlinePreview 页面 ----
+    body = (
+      <iframe
+        title={`kkFileView 预览 - ${attachment.original_name}`}
+        src={kkPreviewUrl}
+        className="w-full h-full border-0 rounded-lg bg-white shadow-inner"
+      />
+    );
   } else {
+    // ---- unsupported 初始状态：提供 3 种操作 ----
     body = (
       <div className="flex flex-col items-center justify-center h-full text-ink-500 gap-4">
         <div className="text-5xl">📄</div>
-        <div>
+        <div className="text-center max-w-[520px]">
           <div className="font-medium text-ink-700 mb-1">
             {attachment.original_name}
           </div>
           <div className="text-[12px] text-ink-400 mb-3">
             {attachment.mime_type || (effectiveMime ? `${effectiveMime}（按扩展名推导）` : '未知格式')} · {formatSize(attachment.size)}
           </div>
-          <div className="text-[13px] leading-6">
-            当前不支持在线预览此格式，可点击右上角「下载」保存到本地后用对应软件打开。
+          <div className="text-[13px] leading-6 mb-5">
+            当前格式未做内嵌预览渲染，可选择下列方式打开。
+          </div>
+          <div className="flex items-center justify-center gap-3 flex-wrap">
+            <button
+              onClick={handleOpenDefaultApp}
+              className="h-9 px-4 rounded-lg text-sm font-medium text-white bg-sage-600 hover:bg-sage-700 transition-all duration-150 shadow-sm hover:shadow"
+            >
+              🚀 用本地应用打开
+            </button>
+            <button
+              onClick={handleTryKkView}
+              disabled={kkLoading}
+              className="h-9 px-4 rounded-lg text-sm font-medium text-ink-700 bg-paper-100 hover:bg-paper-200 disabled:opacity-60 disabled:cursor-not-allowed transition-all duration-150"
+            >
+              {kkLoading ? '⏳ 正在启动 kkFileView…' : '👁️ kkFileView 在线预览'}
+            </button>
+            <button
+              onClick={handleDownload}
+              className="h-9 px-4 rounded-lg text-sm font-medium text-ink-700 border border-paper-200 bg-white hover:bg-paper-100 transition-all duration-150"
+            >
+              ⬇ 下载到本地
+            </button>
+          </div>
+          <div className="mt-4 text-[11px] text-ink-400 leading-5">
+            「本地应用」：调用系统安装的 PowerPoint / WPS / Keynote / Excel 等直接打开<br />
+            「在线预览」：自动启动本地 kkFileView（Docker），通过 LibreOffice 转码后嵌入展示
           </div>
         </div>
       </div>

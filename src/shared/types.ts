@@ -110,6 +110,30 @@ export interface IpcApi {
     error?: string;
   }>;
   'attachments.delete': (id: string) => Promise<boolean>;
+  /**
+   * 把附件写到临时目录，然后用系统默认应用（PowerPoint/WPS/Keynote 等）打开。
+   * 用于不支持在线预览的格式，提供比"下载→手动打开"更便捷的体验。
+   */
+  'attachments.openDefault': (id: string) => Promise<{
+    success: boolean;
+    canceled?: boolean;
+    /** 失败原因（若有），用于 toast 展示给用户 */
+    error?: string;
+  }>;
+  /**
+   * 尝试通过本地 kkFileView（docker 容器）在线预览附件：
+   *   1. 检查 kkFileView 容器并启动（docker start）
+   *   2. 启动/复用主进程的临时 HTTP 服务器，给 kkFileView 提供附件流
+   *   3. 等待健康检查通过后，返回可内嵌 iframe 的 onlinePreview URL
+   * 任何一步失败（docker 不可用 / 端口冲突 / kkFileView 无响应）返回 success=false + 错误说明。
+   */
+  'attachments.prepareKkView': (id: string) => Promise<{
+    success: boolean;
+    /** 可直接 iframe.src 的 URL，仅当 success=true 时有效 */
+    previewUrl?: string;
+    /** 失败原因（若有），用于 toast 展示给用户 */
+    error?: string;
+  }>;
   // settings
   'settings.get': <K extends SettingsKey>(key: K) => Promise<SettingsMap[K] | undefined>;
   'settings.set': <K extends SettingsKey>(key: K, value: SettingsMap[K]) => Promise<void>;

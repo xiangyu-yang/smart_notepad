@@ -50,7 +50,18 @@ const ipcApi: IpcApi = {
       IPC_CHANNELS.ATTACHMENTS_DOWNLOAD,
       id
     ),
-  'attachments.delete': (id) => invoke<boolean>(IPC_CHANNELS.ATTACHMENTS_DELETE, id),
+  'attachments.delete': (id) =>
+    invoke<boolean>(IPC_CHANNELS.ATTACHMENTS_DELETE, id),
+  'attachments.openDefault': (id) =>
+    invoke<{ success: boolean; canceled?: boolean; error?: string }>(
+      IPC_CHANNELS.ATTACHMENTS_OPEN_DEFAULT,
+      id
+    ),
+  'attachments.prepareKkView': (id) =>
+    invoke<{ success: boolean; previewUrl?: string; error?: string }>(
+      IPC_CHANNELS.ATTACHMENTS_PREPARE_KKVIEW,
+      id
+    ),
   'settings.get': <K extends SettingsKey>(key: K) =>
     invoke<SettingsMap[K] | undefined>(IPC_CHANNELS.SETTINGS_GET, key),
   'settings.set': <K extends SettingsKey>(key: K, value: SettingsMap[K]) =>
