@@ -24,7 +24,7 @@
 - **🧩 工程化代码质量**：仓储模式事务化写入、服务层按单一职责拆分、Zustand 多 store 边界清晰、TypeScript 严格模式下零 `any` 与零 `require()`
 - **🗂️ 文件夹树管理**：邻接表 `parent_id` 自引用 CASCADE 支持无限嵌套；记事与文件夹均支持 HTML5 原生拖拽——拖到目标文件夹移入、拖到空白处移回根级；移动后端递归 CTE 循环检测，前端 `isInSubtree` 预检 + 后端兜底双重防护，杜绝 parent_id 成环；删除文件夹递归 CTE 收集后代并级联清理记事与聊天历史
 - **📐 纯文本 PDF 导出**：独立隐藏 print 窗口加载纯净 HTML（`renderToStaticMarkup` 渲染 Markdown，复用 `prose-note` 样式），与预览 1:1 一致；规避直接打印主窗口导致的"截屏式"输出与 UI 元素混入；A4 纸张 + 标准页边距，可选可复制
-- **📎 附件管理**：附件二进制以 base64 持久化于 SQLite，杜绝文件系统散落；`.docx` 经 [mammoth](https://github.com/mwilliamson/mammoth.js) 按需转 HTML 在线预览，图片/PDF 直接渲染，其余格式提供下载入口
+- **📎 附件管理**：附件二进制以 base64 持久化于 SQLite，杜绝文件系统散落；Office 文档（Word/Excel/PPT 等）统一经 [kkFileView](https://github.com/kekingcn/kkFileView) + LibreOffice 转 PDF 在线预览，图片/PDF 直接渲染，其余格式提供本地打开与下载入口；附件栏 ≥2 项时默认折叠为一行，手动展开查看全部
 - **🔁 展开状态持久化**：文件夹折叠/展开状态写入 SQLite `settings` 表（而非 localStorage），应用重启或清除浏览器痕迹后仍可恢复用户习惯；首次进入默认折叠，手动展开才记忆
 - **🎨 行内 HTML 标签渲染**：经 [`rehype-raw`](https://github.com/rehypejs/rehype-raw) 解析 Markdown 内嵌原始 HTML，`<mark>` 高亮、`<u>`/`<ins>` 下划线、`<del>` 删除线、`<sup>`/`<sub>` 上下标等标签在预览、AI 回复、PDF 导出三处一致渲染；本地可信数据源 + Electron CSP 双重保障，无 XSS 风险
 
@@ -50,8 +50,11 @@
 
 ### 📎 附件管理
 - **二进制入库**：附件以 base64 存入 SQLite，无散落文件，随记事一起备份/迁移
-- **多格式预览**：图片直接渲染、PDF 内嵌预览、`.docx` 经 mammoth 转 HTML 在线阅读
-- **下载保存**：任意附件可一键下载到本地，默认文件名沿用原始上传名
+- **Office 文档在线预览**：Word（doc/docx）、Excel（xls/xlsx）、PPT（ppt/pptx）等统一经 kkFileView（Docker 容器 + LibreOffice 转 PDF）嵌入预览，打开附件即自动启动预览服务
+- **图片/PDF 直接渲染**：图片内嵌显示、PDF 原生 iframe 预览，无需第三方服务
+- **文本文件预览**：代码、Markdown、JSON 等纯文本以等宽字体直接渲染
+- **附件栏折叠**：≥2 个附件时默认折叠为一行高度，点击「展开」按钮查看全部；切换记事自动重置
+- **下载与本地打开**：任意附件可一键下载到本地，或调用系统默认应用打开
 - **增删同步**：上传/删除即时刷新列表，切换记事自动加载对应附件
 
 ### 📐 PDF 导出
@@ -93,7 +96,7 @@
 | **样式** | Tailwind CSS 3 + `@tailwindcss/typography` |
 | **数据库** | better-sqlite3（WAL 模式 + 外键级联） |
 | **AI 接口** | Ollama 原生 `/api/chat`（NDJSON 流式） |
-| **附件预览** | mammoth（`.docx` → HTML，按需动态导入） |
+| **附件预览** | kkFileView 4.1（Docker + LibreOffice 转 PDF，Office 文档）/ 原生 iframe（图片/PDF） |
 | **PDF 导出** | Electron 原生 `printToPDF`（零前端依赖） |
 | **构建工具** | Vite 5 + TypeScript 5.6 |
 | **包管理** | pnpm（node-linker=hoisted） |
@@ -119,7 +122,9 @@ smart_notepad/
 │   │   │       ├── ChatRepository.ts
 │   │   │       └── SettingsRepository.ts
 │   │   └── services/
-│   │       └── OllamaService.ts        # Ollama 健康检查 + 启动
+│   │       ├── OllamaService.ts        # Ollama 健康检查 + 启动
+│   │       ├── KkFileViewService.ts   # kkFileView 容器生命周期 + trust 配置修补
+│   │       └── AttachmentFileServer.ts # 本地 HTTP 文件服务（供 kkFileView 拉取附件）
 │   │
 │   ├── preload/
 │   │   └── index.ts                   # contextBridge 安全桥
@@ -135,8 +140,8 @@ smart_notepad/
 │   │       │   │   │   │   ├── NoteCard.tsx   # 记事卡片（可拖拽）
 │   │       │   │   │   │   ├── FolderCard.tsx # 文件夹卡片（可拖拽 + drop target）
 │   │       │   │   │   │   ├── FolderTree.tsx # 顶层树容器（组装根级 + 递归）
-│   │       │   │   │   │   ├── AttachmentCard.tsx    # 附件卡片
-│   │       │   │   │   │   ├── AttachmentPreview.tsx # 附件预览（图片/PDF/docx）
+│   │   │   │   │   │   ├── AttachmentCard.tsx    # 附件卡片
+│   │   │   │   │   │   ├── AttachmentPreview.tsx # 附件预览（图片/PDF/Office/文本）
 │   │       │   │   │   │   ├── ConfirmDialog.tsx
 │   │       │   │   │   │   ├── PromptDialog.tsx  # 文本输入对话框
 │   │       │   │   │   │   ├── IconButton.tsx
@@ -187,6 +192,7 @@ smart_notepad/
 - **Node.js** ≥ 18
 - **pnpm**（推荐）或 npm
 - **Ollama**（可选，用于 AI 助手功能）— [安装指引](https://ollama.com/)
+- **Docker Desktop**（可选，用于 Office 文档在线预览）— 首次预览 Word/Excel/PPT 时自动拉起
 
 ### 安装与运行
 
