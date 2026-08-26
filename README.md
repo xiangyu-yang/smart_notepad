@@ -24,7 +24,7 @@
 - **🧩 工程化代码质量**：仓储模式事务化写入、服务层按单一职责拆分、Zustand 多 store 边界清晰、TypeScript 严格模式下零 `any` 与零 `require()`
 - **🗂️ 文件夹树管理**：邻接表 `parent_id` 自引用 CASCADE 支持无限嵌套；记事与文件夹均支持 HTML5 原生拖拽——拖到目标文件夹移入、拖到空白处移回根级；移动后端递归 CTE 循环检测，前端 `isInSubtree` 预检 + 后端兜底双重防护，杜绝 parent_id 成环；删除文件夹递归 CTE 收集后代并级联清理记事与聊天历史
 - **📐 纯文本 PDF 导出**：独立隐藏 print 窗口加载纯净 HTML（`renderToStaticMarkup` 渲染 Markdown，复用 `prose-note` 样式），与预览 1:1 一致；规避直接打印主窗口导致的"截屏式"输出与 UI 元素混入；A4 纸张 + 标准页边距，可选可复制
-- **📎 附件管理**：附件二进制以 base64 持久化于 SQLite，杜绝文件系统散落；Office 文档（Word/Excel/PPT 等）统一经 [kkFileView](https://github.com/kekingcn/kkFileView) + LibreOffice 转 PDF 在线预览，图片/PDF 直接渲染，其余格式提供本地打开与下载入口；附件栏 ≥2 项时默认折叠为一行，手动展开查看全部
+- **📎 附件管理**：附件二进制以 base64 存入 SQLite `data` 列，磁盘文件丢失时自动从 DB 重建；Office 文档（Word/Excel/PPT 等）统一经 kkFileView + LibreOffice 转 PDF 在线预览，图片/PDF 直接渲染；附件栏 ≥2 项时默认折叠为一行，手动展开查看全部
 - **🔁 展开状态持久化**：文件夹折叠/展开状态写入 SQLite `settings` 表（而非 localStorage），应用重启或清除浏览器痕迹后仍可恢复用户习惯；首次进入默认折叠，手动展开才记忆
 - **🎨 行内 HTML 标签渲染**：经 [`rehype-raw`](https://github.com/rehypejs/rehype-raw) 解析 Markdown 内嵌原始 HTML，`<mark>` 高亮、`<u>`/`<ins>` 下划线、`<del>` 删除线、`<sup>`/`<sub>` 上下标等标签在预览、AI 回复、PDF 导出三处一致渲染；本地可信数据源 + Electron CSP 双重保障，无 XSS 风险
 
@@ -49,7 +49,7 @@
 - **向后兼容**：迁移后现有记事自动落在根目录，列表外观不变
 
 ### 📎 附件管理
-- **二进制入库**：附件以 base64 存入 SQLite，无散落文件，随记事一起备份/迁移
+- **文件数据入库**：附件二进制以 base64 存入 SQLite `data` 列，磁盘文件丢失时自动从 DB 重建，预览不受影响
 - **Office 文档在线预览**：Word（doc/docx）、Excel（xls/xlsx）、PPT（ppt/pptx）等统一经 kkFileView（Docker 容器 + LibreOffice 转 PDF）嵌入预览，打开附件即自动启动预览服务
 - **图片/PDF 直接渲染**：图片内嵌显示、PDF 原生 iframe 预览，无需第三方服务
 - **文本文件预览**：代码、Markdown、JSON 等纯文本以等宽字体直接渲染
@@ -332,15 +332,17 @@ CREATE TABLE chat_active_session (
   session_id TEXT
 );
 
--- 附件（base64 二进制入库，随记事一起备份/迁移）
+-- 附件（元数据在 SQLite，文件内容 base64 备份在 data 列，磁盘文件丢失时自动重建）
 CREATE TABLE attachments (
   id TEXT PRIMARY KEY,
   note_id TEXT NOT NULL,
-  filename TEXT NOT NULL DEFAULT '',
-  mime TEXT NOT NULL DEFAULT 'application/octet-stream',
+  file_name TEXT NOT NULL DEFAULT '',
+  original_name TEXT NOT NULL DEFAULT '',
+  mime_type TEXT NOT NULL DEFAULT '',
   size INTEGER NOT NULL DEFAULT 0,
-  data TEXT NOT NULL DEFAULT '',         -- base64 编码
   created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  data TEXT,                        -- base64 文件内容备份（可选，上传时写入）
   FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_attachments_note_id ON attachments(note_id);
