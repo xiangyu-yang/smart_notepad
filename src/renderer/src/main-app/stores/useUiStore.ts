@@ -72,7 +72,7 @@ let toastSeq = 0;
 
 export const useUiStore = create<UiState>((set, get) => ({
   sidebarSearch: '',
-  showAiPanel: false,
+  showAiPanel: true, // 默认打开 AI 面板，点击按钮可折叠关闭
   toastList: [],
   confirmOptions: null,
   confirmResolver: null,
