@@ -547,7 +547,7 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
             placeholder={isConfigured ? '输入你的问题… (Enter 发送, Shift+Enter 换行)' : '请先在设置中配置 Base URL'}
             disabled={!isConfigured}
             rows={1}
-            style={{ maxHeight: '144px', minHeight: '38px' }}
+            style={{ maxHeight: '288px', minHeight: '76px' }}
             className={[
               'flex-1 resize-none rounded-xl border border-paper-300 bg-white',
               'px-3 py-2 text-[14px] leading-relaxed text-ink-900 placeholder:text-ink-300',
