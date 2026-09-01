@@ -9,6 +9,7 @@ import type {
   Note,
   Folder,
   Attachment,
+  Recording,
   SettingsKey,
   SettingsMap,
   WindowApi,
@@ -83,7 +84,12 @@ const ipcApi: IpcApi = {
   'chat.upsertSession': (session) => invoke<ChatSession>(IPC_CHANNELS.CHAT_UPSERT_SESSION, session),
   'chat.deleteSession': (id) => invoke<boolean>(IPC_CHANNELS.CHAT_DELETE_SESSION, id),
   'chat.replaceAllForNote': (noteId, sessions, activeSessionId) =>
-    invoke<void>(IPC_CHANNELS.CHAT_REPLACE_ALL_FOR_NOTE, noteId, sessions, activeSessionId)
+    invoke<void>(IPC_CHANNELS.CHAT_REPLACE_ALL_FOR_NOTE, noteId, sessions, activeSessionId),
+  'recordings.list': (noteId) => invoke<Recording[]>(IPC_CHANNELS.RECORDINGS_LIST, noteId),
+  'recordings.create': (input) => invoke<Recording>(IPC_CHANNELS.RECORDINGS_CREATE, input),
+  'recordings.update': (id, patch) =>
+    invoke<Recording | null>(IPC_CHANNELS.RECORDINGS_UPDATE, id, patch),
+  'recordings.delete': (id) => invoke<boolean>(IPC_CHANNELS.RECORDINGS_DELETE, id)
 };
 
 const windowApi: WindowApi = {

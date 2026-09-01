@@ -1,8 +1,9 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type SaveDialogOptions } from 'electron';
 import path from 'node:path';
 import { IPC_CHANNELS } from '@shared/constants';
-import type { ChatSession, Folder, Note, SettingsKey, SettingsMap } from '@shared/types';
+import type { ChatSession, Folder, Note, Recording, SettingsKey, SettingsMap } from '@shared/types';
 import { ChatRepository } from './db/repositories/ChatRepository';
+import { RecordingRepository } from './db/repositories/RecordingRepository';
 import { FolderRepository } from './db/repositories/FolderRepository';
 import { NoteRepository } from './db/repositories/NoteRepository';
 import { SettingsRepository } from './db/repositories/SettingsRepository';
@@ -646,4 +647,59 @@ export function registerIpcHandlers(): void {
       }
     }
   );
+
+  // ---------- meeting recordings ----------
+  ipcMain.handle(IPC_CHANNELS.RECORDINGS_LIST, (_e, noteId: string) => {
+    try {
+      return RecordingRepository.listForNote(noteId) as Recording[];
+    } catch (e) {
+      console.error('[ipc] recordings.list error:', e);
+      return [];
+    }
+  });
+
+  ipcMain.handle(
+    IPC_CHANNELS.RECORDINGS_CREATE,
+    (_e, input: {
+      note_id: string;
+      title: string;
+      transcript: string;
+      duration: number;
+      audioUint8: number[];
+    }) => {
+      try {
+        return RecordingRepository.create({
+          note_id: input.note_id,
+          title: input.title,
+          transcript: input.transcript,
+          duration: input.duration,
+          audioUint8: new Uint8Array(input.audioUint8)
+        });
+      } catch (e) {
+        console.error('[ipc] recordings.create error:', e);
+        throw e;
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.RECORDINGS_UPDATE,
+    (_e, id: string, patch: Partial<Pick<Recording, 'title' | 'transcript'>>) => {
+      try {
+        return RecordingRepository.update(id, patch);
+      } catch (e) {
+        console.error('[ipc] recordings.update error:', e);
+        throw e;
+      }
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.RECORDINGS_DELETE, (_e, id: string) => {
+    try {
+      return RecordingRepository.delete(id);
+    } catch (e) {
+      console.error('[ipc] recordings.delete error:', e);
+      return false;
+    }
+  });
 }

@@ -34,6 +34,8 @@ export interface PromptOptions {
 interface UiState {
   sidebarSearch: string;
   showAiPanel: boolean;
+  /** 会议录音面板（与 AI 面板互斥，打开一个自动关闭另一个） */
+  showMeetingRecorderPanel: boolean;
   toastList: Toast[];
   confirmOptions: ConfirmOptions | null;
   confirmResolver: ((value: ConfirmResult) => void) | null;
@@ -50,6 +52,8 @@ interface UiState {
   setSidebarSearch: (v: string) => void;
   setShowAiPanel: (v: boolean) => void;
   toggleShowAiPanel: () => void;
+  setShowMeetingRecorderPanel: (v: boolean) => void;
+  toggleShowMeetingRecorderPanel: () => void;
   setReasoningEnabled: (v: boolean) => void;
   toggleReasoning: () => void;
   setAiPanelWidth: (w: number) => void;
@@ -73,6 +77,7 @@ let toastSeq = 0;
 export const useUiStore = create<UiState>((set, get) => ({
   sidebarSearch: '',
   showAiPanel: true, // 默认打开 AI 面板，点击按钮可折叠关闭
+  showMeetingRecorderPanel: false, // 会议录音面板默认关闭，与 AI 面板互斥
   toastList: [],
   confirmOptions: null,
   confirmResolver: null,
@@ -83,8 +88,10 @@ export const useUiStore = create<UiState>((set, get) => ({
   attachmentPreview: null,
 
   setSidebarSearch: (v) => set({ sidebarSearch: v }),
-  setShowAiPanel: (v) => set({ showAiPanel: v }),
-  toggleShowAiPanel: () => set({ showAiPanel: !get().showAiPanel }),
+  setShowAiPanel: (v) => set({ showAiPanel: v, showMeetingRecorderPanel: v ? false : get().showMeetingRecorderPanel }),
+  toggleShowAiPanel: () => set((s) => ({ showAiPanel: !s.showAiPanel, showMeetingRecorderPanel: !s.showAiPanel ? false : s.showMeetingRecorderPanel })),
+  setShowMeetingRecorderPanel: (v) => set({ showMeetingRecorderPanel: v, showAiPanel: v ? false : get().showAiPanel }),
+  toggleShowMeetingRecorderPanel: () => set((s) => ({ showMeetingRecorderPanel: !s.showMeetingRecorderPanel, showAiPanel: !s.showMeetingRecorderPanel ? false : s.showAiPanel })),
   setReasoningEnabled: (v) => set({ reasoningEnabled: v }),
   toggleReasoning: () => set({ reasoningEnabled: !get().reasoningEnabled }),
   setAiPanelWidth: (w) => set({ aiPanelWidth: Math.max(280, Math.min(640, w)) }),

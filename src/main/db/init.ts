@@ -105,7 +105,39 @@ export function initializeDatabase(): Database.Database {
       FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_attachments_note_id ON attachments(note_id);
+
+    CREATE TABLE IF NOT EXISTS recordings (
+      id TEXT PRIMARY KEY,
+      note_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      transcript TEXT NOT NULL DEFAULT '',
+      duration INTEGER NOT NULL DEFAULT 0,
+      audio_path TEXT NOT NULL DEFAULT '',
+      transcript_path TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_recordings_note_id ON recordings(note_id);
+    CREATE INDEX IF NOT EXISTS idx_recordings_created ON recordings(created_at DESC);
   `);
+
+  // --- 迁移：recordings 表补 audio_path / transcript_path 列（兼容旧版本）---
+  try {
+    const recCols = db.prepare("PRAGMA table_info(recordings)").all() as Array<{ name: string }>;
+    if (recCols.length > 0) {
+      if (!recCols.some((c) => c.name === 'audio_path')) {
+        db.exec('ALTER TABLE recordings ADD COLUMN audio_path TEXT NOT NULL DEFAULT ""');
+        console.log('[db] migration: add recordings.audio_path column');
+      }
+      if (!recCols.some((c) => c.name === 'transcript_path')) {
+        db.exec('ALTER TABLE recordings ADD COLUMN transcript_path TEXT NOT NULL DEFAULT ""');
+        console.log('[db] migration: add recordings.transcript_path column');
+      }
+    }
+  } catch (e) {
+    console.warn('[db] migration: add recordings columns failed:', e);
+  }
 
   // --- 迁移：attachments 表补 data 列（文件内容 base64 备份，防止磁盘文件丢失）---
   try {

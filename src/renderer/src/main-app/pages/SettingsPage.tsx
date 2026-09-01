@@ -156,15 +156,25 @@ export default function SettingsPage() {
   const storeLoaded = useSettingsStore((s) => s.loaded);
   const loadAll = useSettingsStore((s) => s.loadAll);
   const saveSettings = useSettingsStore((s) => s.save);
+  const saveTranscribe = useSettingsStore((s) => s.saveTranscribe);
   const currentNoteId = useNoteStore((s) => s.currentId);
 
   const storeBaseUrl = useSettingsStore((s) => s.baseUrl);
   const storeApiKey = useSettingsStore((s) => s.apiKey);
   const storeModel = useSettingsStore((s) => s.model);
+  const storeTranscribeBaseUrl = useSettingsStore((s) => s.transcribeBaseUrl);
+  const storeTranscribeApiKey = useSettingsStore((s) => s.transcribeApiKey);
+  const storeTranscribeModel = useSettingsStore((s) => s.transcribeModel);
+  const storeTranscribeLanguage = useSettingsStore((s) => s.transcribeLanguage);
 
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [transcribeBaseUrl, setTranscribeBaseUrl] = useState('');
+  const [transcribeApiKey, setTranscribeApiKey] = useState('');
+  const [transcribeModel, setTranscribeModel] = useState('');
+  const [transcribeLanguage, setTranscribeLanguage] = useState('zh');
+  const [showTranscribeKey, setShowTranscribeKey] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -192,8 +202,12 @@ export default function SettingsPage() {
       setBaseUrl(storeBaseUrl);
       setApiKey(storeApiKey);
       setModel(storeModel);
+      setTranscribeBaseUrl(storeTranscribeBaseUrl);
+      setTranscribeApiKey(storeTranscribeApiKey);
+      setTranscribeModel(storeTranscribeModel);
+      setTranscribeLanguage(storeTranscribeLanguage);
     }
-  }, [storeLoaded, storeBaseUrl, storeApiKey, storeModel]);
+  }, [storeLoaded, storeBaseUrl, storeApiKey, storeModel, storeTranscribeBaseUrl, storeTranscribeApiKey, storeTranscribeModel, storeTranscribeLanguage]);
 
   // When Base URL changes, debounce fetch available models
   useEffect(() => {
@@ -224,7 +238,11 @@ export default function SettingsPage() {
   const isDirty =
     baseUrl !== storeBaseUrl ||
     apiKey !== storeApiKey ||
-    model !== storeModel;
+    model !== storeModel ||
+    transcribeBaseUrl !== storeTranscribeBaseUrl ||
+    transcribeApiKey !== storeTranscribeApiKey ||
+    transcribeModel !== storeTranscribeModel ||
+    transcribeLanguage !== storeTranscribeLanguage;
 
   const handleBack = useCallback(() => {
     // Strategy 1: browser history back (most reliable for hash routing)
@@ -252,6 +270,12 @@ export default function SettingsPage() {
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
         model: model.trim() || 'gpt-4o-mini'
+      });
+      await saveTranscribe({
+        baseUrl: transcribeBaseUrl.trim(),
+        apiKey: transcribeApiKey.trim(),
+        model: transcribeModel.trim() || 'whisper-1',
+        language: transcribeLanguage.trim()
       });
       await loadAll();
       toast.success('设置已保存');
@@ -502,6 +526,87 @@ export default function SettingsPage() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </section>
+
+        <section className="mb-10">
+          <div className="text-sm font-semibold text-sage-700 mb-4 px-1 uppercase tracking-wider text-xs">
+            会议录音转写
+          </div>
+          <div className="bg-paper-100/60 rounded-2xl p-5 space-y-5 border border-paper-200/70">
+            <div>
+              <label className="block text-sm font-medium text-ink-700 mb-1.5">
+                转写服务 Base URL
+              </label>
+              <input
+                type="text"
+                value={transcribeBaseUrl}
+                onChange={(e) => setTranscribeBaseUrl(e.target.value)}
+                placeholder="https://api.openai.com/v1 或 https://api.groq.com/openai/v1"
+                className="w-full h-10 px-3.5 rounded-xl bg-white border border-paper-300/80 hover:border-paper-300 focus:border-sage-500 focus:ring-2 focus:ring-sage-500/30 outline-none text-sm text-ink-900 placeholder:text-ink-300 transition-all"
+              />
+              <div className="text-xs text-ink-300 mt-1.5 px-1">
+                兼容 OpenAI /audio/transcriptions 端点。留空则禁用录音转写功能
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-700 mb-1.5">
+                转写服务 API Key
+              </label>
+              <div className="relative">
+                <input
+                  type={showTranscribeKey ? 'text' : 'password'}
+                  value={transcribeApiKey}
+                  onChange={(e) => setTranscribeApiKey(e.target.value)}
+                  placeholder={storeTranscribeApiKey ? '••••••••' : 'sk-...（本地服务可留空）'}
+                  className="w-full h-10 pl-3.5 pr-12 rounded-xl bg-white border border-paper-300/80 hover:border-paper-300 focus:border-sage-500 focus:ring-2 focus:ring-sage-500/30 outline-none text-sm text-ink-900 placeholder:text-ink-300 transition-all font-mono"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowTranscribeKey((v) => !v)}
+                  className="no-drag absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-lg flex items-center justify-center text-ink-500 hover:text-ink-900 hover:bg-paper-100 transition-colors text-sm"
+                  title={showTranscribeKey ? '隐藏明文' : '显示明文'}
+                >
+                  {showTranscribeKey ? '🙈' : '👁'}
+                </button>
+              </div>
+              <div className="text-xs text-ink-300 mt-1.5 px-1">
+                仅保存在本地 SQLite，不会上传到任何服务器
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-700 mb-1.5">
+                转写模型名称
+              </label>
+              <input
+                type="text"
+                value={transcribeModel}
+                onChange={(e) => setTranscribeModel(e.target.value)}
+                placeholder="whisper-1"
+                className="w-full h-10 px-3.5 rounded-xl bg-white border border-paper-300/80 hover:border-paper-300 focus:border-sage-500 focus:ring-2 focus:ring-sage-500/30 outline-none text-sm text-ink-900 placeholder:text-ink-300 transition-all"
+              />
+              <div className="text-xs text-ink-300 mt-1.5 px-1">
+                OpenAI：whisper-1 · Groq：whisper-large-v3 等
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-ink-700 mb-1.5">
+                语言提示
+              </label>
+              <input
+                type="text"
+                value={transcribeLanguage}
+                onChange={(e) => setTranscribeLanguage(e.target.value)}
+                placeholder="zh（留空则自动检测）"
+                className="w-full h-10 px-3.5 rounded-xl bg-white border border-paper-300/80 hover:border-paper-300 focus:border-sage-500 focus:ring-2 focus:ring-sage-500/30 outline-none text-sm text-ink-900 placeholder:text-ink-300 transition-all"
+              />
+              <div className="text-xs text-ink-300 mt-1.5 px-1">
+                填写语言代码（如 zh、en）可提高转写准确率，留空则自动检测
+              </div>
             </div>
           </div>
         </section>

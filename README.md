@@ -52,6 +52,9 @@
   <br />
 - **🎨 行内 HTML 标签渲染**：经 [`rehype-raw`](https://github.com/rehypejs/rehype-raw) 解析 Markdown 内嵌原始 HTML，`<mark>` 高亮、`<u>`/`<ins>` 下划线、`<del>` 删除线、`<sup>`/`<sub>` 上下标等标签在预览、AI 回复、PDF 导出三处一致渲染；本地可信数据源 + Electron CSP 双重保障，无 XSS 风险
 
+  <br />
+- **🎙 会议录音与转写**：基于 `AudioContext + ScriptProcessor` 直接采集 PCM 数据并在渲染进程内编码标准 16-bit PCM WAV，规避 MediaRecorder 的 webm/opus 容器对 whisper.cpp 的兼容性问题；音频文件与转写文本分别以 `.wav`/`.txt` 持久化到磁盘 `{root}/recordings/{noteId}/`，SQLite 仅存元数据与相对路径；双层 UI 架构——顶部 🎙 按钮触发独立会议录音面板（持久化 + 历史管理），AI 面板发送按钮旁 🎤 图标支持快速语音输入（非持久化）；Mac 上原生 whisper.cpp 利用 Metal + Apple Neural Engine 加速，转写速度可达 10× 实时
+
 ***
 
 ## ✨ 核心特性
@@ -109,6 +112,15 @@
 - **跨重启持久化**：聊天会话与消息存入 SQLite，重启应用自动恢复
 - **插入到编辑器**：一键将 AI 回复插入到编辑器光标位置
 
+### 🎙 会议录音与转写
+
+- **双层 UI 架构**：顶部 🎙 按钮触发独立会议录音面板（转写内容持久化到磁盘 + 历史管理），AI 面板发送按钮旁 🎤 图标支持快速语音输入（转写后填入对话框，非持久化）
+- **原生 WAV 采集**：基于 `AudioContext + ScriptProcessor` 直接采集 PCM 数据并在渲染进程内编码标准 16-bit PCM WAV，无需 MediaRecorder，规避 webm/opus 容器对 whisper.cpp 的兼容性问题
+- **磁盘文件持久化**：音频文件（`.wav`）与转写文本文件（`.txt`）分别保存到 `{root}/recordings/{noteId}/{recordingId}.wav|txt`，SQLite 仅存元数据与相对路径；编辑转写文本时同步刷新磁盘文件
+- **Mac GPU 加速**：原生 whisper.cpp 利用 Metal + Apple Neural Engine 加速转写，large-v3 模型可达 10× 实时速度
+- **会议录音面板**：录音控制（开始/暂停/恢复/停止）、实时计时器、自动转写、历史列表（按时间降序）、卡片式展开、双击编辑标题与转写文本、一键插入到编辑器、删除录音（同步清理磁盘文件）
+- **快速语音输入**：AI 面板发送按钮旁的 🎤 图标，录音中变红脉冲，停止后自动转写填入对话框，可编辑后发送到 AI 对话
+
 ### 🛡️ 数据安全
 
 - **关闭守卫**：窗口关闭前检测未保存变更，提供 保存 / 不保存 / 取消 三选一
@@ -127,6 +139,8 @@
 | **样式**     | Tailwind CSS 3 + `@tailwindcss/typography`                                    |
 | **数据库**    | better-sqlite3（WAL 模式 + 外键级联）                                                 |
 | **AI 接口**  | Ollama 原生 `/api/chat`（NDJSON 流式）                                              |
+| **语音转写** | whisper.cpp（本地 OpenAI 兼容 `/v1/audio/transcriptions` 端点，Mac Metal + ANE 加速）        |
+| **音频采集** | Web Audio API（AudioContext + ScriptProcessor，渲染进程内 PCM → WAV 编码）              |
 | **附件预览**   | kkFileView 4.1（Docker + LibreOffice 转 PDF，Office 文档）/ 原生 iframe（图片/PDF）       |
 | **PDF 导出** | Electron 原生 `printToPDF`（零前端依赖）                                               |
 | **构建工具**   | Vite 5 + TypeScript 5.6                                                       |
@@ -151,6 +165,7 @@ smart_notepad/
 │   │   │       ├── FolderRepository.ts   # 文件夹 CRUD + 递归删除 + 移动（循环检测）
 │   │   │       ├── AttachmentRepository.ts # 附件 CRUD（base64 入库）
 │   │   │       ├── ChatRepository.ts
+│   │   │       ├── RecordingRepository.ts  # 会议录音 CRUD（磁盘文件 + DB 元数据）
 │   │   │       └── SettingsRepository.ts
 │   │   └── services/
 │   │       ├── OllamaService.ts        # Ollama 健康检查 + 启动
@@ -167,8 +182,9 @@ smart_notepad/
 │   │       │   ├── main.tsx           # React 入口
 │   │       │   │   ├── components/
 │   │       │   │   │   │   ├── Layout.tsx     # 侧栏 + 搜索 + 主区
-│   │       │   │   │   │   ├── AiPanel.tsx    # AI 助手面板
-│   │       │   │   │   │   ├── NoteCard.tsx   # 记事卡片（可拖拽）
+│   │       │   │   │   ├── AiPanel.tsx    # AI 助手面板（含快速语音输入按钮）
+│   │       │   │   │   ├── MeetingRecorderPanel.tsx # 会议录音面板（录音控制 + 历史管理）
+│   │       │   │   │   ├── NoteCard.tsx   # 记事卡片（可拖拽）
 │   │       │   │   │   │   ├── FolderCard.tsx # 文件夹卡片（可拖拽 + drop target）
 │   │       │   │   │   │   ├── FolderTree.tsx # 顶层树容器（组装根级 + 递归）
 │   │   │   │   │   │   ├── AttachmentCard.tsx    # 附件卡片
@@ -184,6 +200,8 @@ smart_notepad/
 │   │       │   │   └── SettingsPage.tsx
 │   │       │   ├── hooks/
 │   │       │   │   ├── useChat.ts            # 聊天流式请求
+│   │       │   │   ├── useMeetingRecorder.ts # 会议录音（AudioContext + PCM → WAV 编码）
+│   │       │   │   ├── useTranscription.ts   # 语音转写（OpenAI 兼容 /audio/transcriptions）
 │   │       │   │   ├── useDirtyGuard.ts      # 关闭 dirty 守卫
 │   │       │   │   ├── useNavigateSafe.ts     # 安全导航
 │   │       │   │   ├── useConfirm.ts
@@ -194,9 +212,10 @@ smart_notepad/
 │   │       │   │   ├── useFolderStore.ts      # 文件夹状态 + 折叠持久化
 │   │       │   │   ├── useEditorStore.ts
 │   │       │   │   ├── useChatStore.ts        # 聊天状态 + 防抖持久化
+│   │       │   │   ├── useRecordingsStore.ts  # 会议录音状态 + IPC 持久化
 │   │       │   │   ├── useAttachmentStore.ts  # 附件列表 + CRUD
-│   │       │   │   ├── useSettingsStore.ts
-│   │       │   │   └── useUiStore.ts
+│   │       │   │   ├── useSettingsStore.ts    # LLM + 转写服务配置
+│   │       │   │   └── useUiStore.ts          # UI 状态 + AI/录音面板互斥
 │   │       │   └── utils/
 │   │       │       ├── format-time.ts
 │   │       │       └── text.ts
@@ -223,6 +242,7 @@ smart_notepad/
 - **Node.js** ≥ 18
 - **pnpm**（推荐）或 npm
 - **Ollama**（可选，用于 AI 助手功能）— [安装指引](https://ollama.com/)
+- **whisper.cpp**（可选，用于会议录音转写）— macOS 安装：`brew install whisper-cpp`
 - **Docker Desktop**（可选，用于 Office 文档在线预览）— 首次预览 Word/Excel/PPT 时自动拉起
 
 ### 安装与运行
@@ -253,6 +273,38 @@ pnpm run build:mac
 3. （Ollama 无需 API Key）填写 **API Key**
 4. **Model 名称**：填写 Ollama Base URL 后自动列出可用模型，或手动输入
 5. 点击 **测试连接** 验证；若 Ollama 未运行，可点击 **🚀 启动 Ollama** 自动拉起
+
+### 配置会议录音转写
+
+1. 安装 whisper.cpp 并下载模型：
+
+   ```bash
+   # 安装（macOS，已含 Metal + Apple Neural Engine 加速）
+   brew install whisper-cpp
+
+   # 下载模型（推荐 large-v3，中文精度最高）
+   mkdir -p ~/Documents/whisper-models
+   curl -L -o ~/Documents/whisper-models/ggml-large-v3.bin \
+     https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3.bin
+   ```
+
+2. 启动 whisper-server（OpenAI 兼容 `/v1/audio/transcriptions` 端点）：
+
+   ```bash
+   whisper-server \
+     --host 127.0.0.1 --port 8000 \
+     --model ~/Documents/whisper-models/ggml-large-v3.bin \
+     --inference-path /v1/audio/transcriptions \
+     --language zh
+   ```
+
+3. 应用设置页 **会议录音转写** 区填入：
+   - **Base URL**：`http://localhost:8000/v1`
+   - **API Key**：留空（本地服务无需鉴权）
+   - **模型名称**：`whisper-1`
+   - **语言**：`zh`
+
+> 一键启动脚本 `启动智能记事本.command` 已自动按顺序拉起 whisper-server 与 Vite + Electron。
 
 ***
 
@@ -290,9 +342,10 @@ pnpm run build:mac
 | `useFolderStore`     | 文件夹扁平数组、折叠状态（SQLite 持久化）、移动、当前选中作为新建落点          |
 | `useEditorStore`     | 编辑器内容、pristine 状态、光标选区（dirty 计算依据）              |
 | `useChatStore`       | 按 noteId 隔离的会话桶、流式状态、防抖持久化（350ms）               |
+| `useRecordingsStore` | 按当前记事的录音列表、IPC 持久化、删除清理                        |
 | `useAttachmentStore` | 附件列表、上传/删除、当前预览项                                |
-| `useSettingsStore`   | LLM 配置（baseUrl / apiKey / model）                |
-| `useUiStore`         | 侧栏搜索、AI 面板开关与宽度、Toast、Confirm/Prompt 对话框、思考过程开关 |
+| `useSettingsStore`   | LLM 配置 + 转写服务配置（baseUrl / apiKey / model / language）   |
+| `useUiStore`         | 侧栏搜索、AI 面板开关与宽度、会议录音面板开关（与 AI 面板互斥）、Toast、Confirm/Prompt 对话框、思考过程开关 |
 
 ### 聊天持久化策略
 
@@ -363,6 +416,22 @@ CREATE TABLE chat_active_session (
   session_id TEXT
 );
 
+-- 会议录音（音频文件与转写文本文件持久化到磁盘，SQLite 仅存元数据 + 路径）
+CREATE TABLE recordings (
+  id TEXT PRIMARY KEY,
+  note_id TEXT NOT NULL,
+  title TEXT NOT NULL DEFAULT '',
+  transcript TEXT NOT NULL DEFAULT '',
+  duration INTEGER NOT NULL DEFAULT 0,
+  audio_path TEXT NOT NULL DEFAULT '',        -- 音频文件相对路径 {noteId}/{recordingId}.wav
+  transcript_path TEXT NOT NULL DEFAULT '',   -- 转写文本文件相对路径 {noteId}/{recordingId}.txt
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY (note_id) REFERENCES notes(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_recordings_note_id ON recordings(note_id);
+CREATE INDEX idx_recordings_created ON recordings(created_at DESC);
+
 -- 附件（元数据在 SQLite，文件内容 base64 备份在 data 列，磁盘文件丢失时自动重建）
 CREATE TABLE attachments (
   id TEXT PRIMARY KEY,
@@ -418,8 +487,9 @@ CREATE TABLE settings (
 
 ## 🔒 隐私说明
 
-- 所有记事内容、AI 对话历史、应用设置**仅存储于本地 SQLite**
+- 所有记事内容、AI 对话历史、会议录音与转写、应用设置**仅存储于本地 SQLite 与本地磁盘**
 - AI 请求直接从渲染进程发往你配置的 Base URL（Ollama 本地或你自己的 API 端点）
+- 语音转写请求发往你配置的转写服务 Base URL（本地 whisper.cpp 或你自己的端点），音频文件不出本机
 - API Key 仅保存在本地，不会上传到任何服务器
 - 无任何遥测、无任何远程上报
 

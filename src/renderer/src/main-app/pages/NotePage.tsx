@@ -16,6 +16,7 @@ import { AttachmentCard } from '../components/AttachmentCard';
 import { formatShortDateTime } from '../utils/format-time';
 
 const AiPanel = lazy(() => import('../components/AiPanel'));
+const MeetingRecorderPanel = lazy(() => import('../components/MeetingRecorderPanel'));
 
 type ViewMode = 'edit' | 'preview' | 'split';
 
@@ -220,6 +221,8 @@ export default function NotePage() {
 
   const showAiPanel = useUiStore((s) => s.showAiPanel);
   const toggleShowAiPanel = useUiStore((s) => s.toggleShowAiPanel);
+  const showMeetingRecorderPanel = useUiStore((s) => s.showMeetingRecorderPanel);
+  const toggleShowMeetingRecorderPanel = useUiStore((s) => s.toggleShowMeetingRecorderPanel);
   const aiPanelWidth = useUiStore((s) => s.aiPanelWidth);
   const setAiPanelWidth = useUiStore((s) => s.setAiPanelWidth);
 
@@ -582,6 +585,14 @@ export default function NotePage() {
           )}
           <IconButton
             size="sm"
+            variant={showMeetingRecorderPanel ? 'soft' : 'ghost'}
+            onClick={toggleShowMeetingRecorderPanel}
+            title={showMeetingRecorderPanel ? '关闭会议录音面板' : '打开会议录音面板'}
+          >
+            🎙
+          </IconButton>
+          <IconButton
+            size="sm"
             variant={showAiPanel ? 'soft' : 'ghost'}
             onClick={toggleShowAiPanel}
             title={showAiPanel ? '关闭 AI 面板' : '打开 AI 面板'}
@@ -691,8 +702,8 @@ export default function NotePage() {
           )}
         </div>
 
-        {/* 拖动分隔条：仅在 AI 面板显示时出现 */}
-        {showAiPanel && (
+        {/* 拖动分隔条：任一右侧面板显示时出现 */}
+        {(showAiPanel || showMeetingRecorderPanel) && (
           <div
             onMouseDown={handleResizeStart}
             className="shrink-0 w-1.5 cursor-col-resize hover:bg-sage-400/40 active:bg-sage-500/60 transition-colors bg-paper-200/50"
@@ -702,11 +713,16 @@ export default function NotePage() {
 
         <div
           className="shrink-0 border-l border-paper-200/80 overflow-hidden"
-          style={{ width: showAiPanel ? aiPanelWidth : 0, minWidth: 0 }}
+          style={{ width: (showAiPanel || showMeetingRecorderPanel) ? aiPanelWidth : 0, minWidth: 0 }}
         >
           {showAiPanel && (
             <Suspense fallback={<div className="h-full bg-paper-50" />}>
               <AiPanel onInsert={handleInsertAtCursor} textareaRef={textareaRef} />
+            </Suspense>
+          )}
+          {showMeetingRecorderPanel && (
+            <Suspense fallback={<div className="h-full bg-paper-50" />}>
+              <MeetingRecorderPanel onInsert={handleInsertAtCursor} />
             </Suspense>
           )}
         </div>

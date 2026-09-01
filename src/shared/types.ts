@@ -40,6 +40,12 @@ export interface SettingsMap {
   'llm.model'?: string;
   /** 文件夹展开状态：folderId → 是否展开。用户偏好持久化到 SQLite，重启/清缓存不丢 */
   'ui.folderExpanded'?: Record<string, boolean>;
+  /** 会议录音转写服务配置（OpenAI 兼容 /audio/transcriptions 端点） */
+  'transcribe.baseUrl'?: string;
+  'transcribe.apiKey'?: string;
+  'transcribe.model'?: string;
+  /** 语言提示（如 zh、en），留空则自动检测 */
+  'transcribe.language'?: string;
 }
 
 export type SettingsKey = keyof SettingsMap;
@@ -59,6 +65,28 @@ export interface ChatSession {
   note_id: string;
   title: string;
   messages: ChatMessage[];
+  created_at: number;
+  updated_at: number;
+}
+
+/**
+ * 会议录音 —— 每条录音关联一篇记事。
+ * 音频文件（.wav）和转写文本文件（.txt）持久化到磁盘，
+ * SQLite 仅保存元数据和文件相对路径。
+ */
+export interface Recording {
+  id: string;
+  note_id: string;
+  /** 录音标题（默认取转写文本前 30 字，用户可编辑） */
+  title: string;
+  /** 转写文本（内存缓存，磁盘上也有一份 .txt 文件） */
+  transcript: string;
+  /** 录音时长（秒） */
+  duration: number;
+  /** 音频文件相对路径（相对于 recordings 存储根目录） */
+  audio_path: string;
+  /** 转写文本文件相对路径（相对于 recordings 存储根目录） */
+  transcript_path: string;
   created_at: number;
   updated_at: number;
 }
@@ -144,6 +172,18 @@ export interface IpcApi {
   'chat.upsertSession': (session: ChatSession) => Promise<ChatSession>;
   'chat.deleteSession': (id: string) => Promise<boolean>;
   'chat.replaceAllForNote': (noteId: string, sessions: ChatSession[], activeSessionId: string | null) => Promise<void>;
+  // recordings (会议录音转写持久化，每篇记事独立)
+  'recordings.list': (noteId: string) => Promise<Recording[]>;
+  'recordings.create': (input: {
+    note_id: string;
+    title: string;
+    transcript: string;
+    duration: number;
+    /** 音频文件二进制数据（WAV 格式），主进程写入磁盘 */
+    audioUint8: number[];
+  }) => Promise<Recording>;
+  'recordings.update': (id: string, patch: Partial<Pick<Recording, 'title' | 'transcript'>>) => Promise<Recording | null>;
+  'recordings.delete': (id: string) => Promise<boolean>;
   // window
   'window.minimizeMain': () => Promise<void>;
   'window.maximizeMain': () => Promise<boolean>;

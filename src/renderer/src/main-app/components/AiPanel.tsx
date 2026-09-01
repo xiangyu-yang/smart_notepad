@@ -9,6 +9,8 @@ import { useEditorStore } from '../stores/useEditorStore';
 import { useToast } from '../hooks/useToast';
 import { useNavigateSafe } from '../hooks/useNavigateSafe';
 import { useChat } from '../hooks/useChat';
+import { useMeetingRecorder } from '../hooks/useMeetingRecorder';
+import { useTranscription } from '../hooks/useTranscription';
 import IconButton from './IconButton';
 import ReasoningBlock from './ReasoningBlock';
 
@@ -26,6 +28,26 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
   const setShowAiPanel = useUiStore((s) => s.setShowAiPanel);
   const reasoningEnabled = useUiStore((s) => s.reasoningEnabled);
   const toggleReasoning = useUiStore((s) => s.toggleReasoning);
+
+  const transcribeBaseUrl = useSettingsStore((s) => s.transcribeBaseUrl);
+  const transcribeApiKey = useSettingsStore((s) => s.transcribeApiKey);
+  const transcribeModel = useSettingsStore((s) => s.transcribeModel);
+  const transcribeLanguage = useSettingsStore((s) => s.transcribeLanguage);
+
+  const {
+    status: recorderStatus,
+    duration: recorderDuration,
+    error: recorderError,
+    start: startRecording,
+    stop: stopRecording,
+    reset: resetRecorder
+  } = useMeetingRecorder();
+  const {
+    isTranscribing,
+    transcribe,
+    reset: resetTranscription
+  } = useTranscription();
+  const [showTranscribedHint, setShowTranscribedHint] = useState(false);
 
   const {
     currentSession,
@@ -70,10 +92,18 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
     scrollToBottom();
   }, [messages, streamingId, scrollToBottom]);
 
+  // 录音 hook 内部错误通过 toast 提示用户
+  useEffect(() => {
+    if (recorderError) {
+      toast.error(recorderError);
+    }
+  }, [recorderError, toast]);
+
   const handleSend = useCallback(() => {
     const text = inputValue.trim();
     if (!text || loading) return;
     setInputValue('');
+    setShowTranscribedHint(false);
     sendMessage(text).catch((err) => {
       console.error('[AiPanel] sendMessage failed:', err);
     });
@@ -165,6 +195,77 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
     // then go through the dirty-safe gate before actually navigating.
     setShowAiPanel(false);
     await navigateIfSafe(() => navigate('/settings'));
+  };
+
+  const isTranscribeConfigured = Boolean(transcribeBaseUrl);
+  const isRecording = recorderStatus === 'recording' || recorderStatus === 'paused';
+
+  const formatDuration = useCallback((sec: number): string => {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  }, []);
+
+  const handleToggleRecording = useCallback(async () => {
+    if (isRecording) {
+      // 停止录音 → 自动触发转写
+      const blob = await stopRecording();
+      if (!blob || blob.size === 0) {
+        toast.error('录音内容为空');
+        resetRecorder();
+        return;
+      }
+      const recordedDuration = recorderDuration;
+      try {
+        const text = await transcribe(blob, {
+          baseUrl: transcribeBaseUrl,
+          apiKey: transcribeApiKey,
+          model: transcribeModel,
+          language: transcribeLanguage
+        });
+        if (text.trim()) {
+          setInputValue(text);
+          setShowTranscribedHint(true);
+          toast.success(`转写完成（时长 ${formatDuration(recordedDuration)}）`);
+        } else {
+          toast.info('未识别到语音内容');
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : '转写失败';
+        toast.error(message);
+      } finally {
+        resetRecorder();
+      }
+    } else {
+      // 开始录音
+      if (!isTranscribeConfigured) {
+        toast.info('请先在设置中配置转写服务');
+        return;
+      }
+      setShowTranscribedHint(false);
+      resetTranscription();
+      await startRecording();
+    }
+  }, [
+    isRecording,
+    stopRecording,
+    resetRecorder,
+    recorderDuration,
+    transcribe,
+    transcribeBaseUrl,
+    transcribeApiKey,
+    transcribeModel,
+    transcribeLanguage,
+    toast,
+    formatDuration,
+    isTranscribeConfigured,
+    resetTranscription,
+    startRecording
+  ]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInputValue(e.target.value);
+    if (showTranscribedHint) setShowTranscribedHint(false);
   };
 
   return (
@@ -424,12 +525,24 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
           >
             🧠 思考 {reasoningEnabled ? '开' : '关'}
           </button>
+          {(isRecording || isTranscribing) && (
+            <span className="text-[11px] text-ink-400 tabular-nums">
+              {isTranscribing
+                ? '⏳ 转写中…'
+                : `${formatDuration(recorderDuration)} ${recorderStatus === 'paused' ? '已暂停' : '录制中'}`}
+            </span>
+          )}
         </div>
+        {showTranscribedHint && (
+          <div className="text-[10px] text-sage-600 mb-1 px-1">
+            ↑ 已从录音转写，可编辑后发送
+          </div>
+        )}
         <div className="flex items-end gap-2">
           <textarea
             ref={aiTextareaRef}
             value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={isConfigured ? '输入你的问题… (Enter 发送, Shift+Enter 换行)' : '请先在设置中配置 Base URL'}
             disabled={!isConfigured}
@@ -442,6 +555,34 @@ export default memo(function AiPanel({ onInsert, textareaRef }: AiPanelProps) {
               'thin-scrollbar disabled:bg-paper-100 disabled:cursor-not-allowed'
             ].join(' ')}
           />
+          {/* 语音输入按钮：放在发送按钮旁，录音中变红脉冲 */}
+          <button
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={handleToggleRecording}
+            disabled={isTranscribing || !isTranscribeConfigured}
+            title={
+              !isTranscribeConfigured
+                ? '请先在设置中配置转写服务'
+                : isTranscribing
+                  ? '正在转写录音…'
+                  : isRecording
+                    ? '停止录音并转写'
+                    : '语音输入'
+            }
+            className={[
+              'no-drag h-[38px] w-[38px] shrink-0 rounded-xl flex items-center justify-center text-[16px]',
+              'transition-all duration-150 hover:scale-[1.05] active:scale-[0.95] border',
+              isTranscribing
+                ? 'bg-paper-100 text-ink-300 cursor-not-allowed border-transparent'
+                : isRecording
+                  ? 'bg-rose-100 text-rose-600 border-rose-200/70 hover:bg-rose-200/70 animate-pulse'
+                  : !isTranscribeConfigured
+                    ? 'bg-paper-100 text-ink-300 cursor-not-allowed border-transparent'
+                    : 'text-ink-500 hover:text-ink-700 hover:bg-paper-100 border-transparent'
+            ].join(' ')}
+          >
+            {isTranscribing ? '⏳' : isRecording ? '⏹' : '🎤'}
+          </button>
           {loading ? (
             <IconButton
               size="md"

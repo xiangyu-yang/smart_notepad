@@ -22,6 +22,11 @@ export const IPC_CHANNELS = {
   CHAT_UPSERT_SESSION: 'chat.upsertSession',
   CHAT_DELETE_SESSION: 'chat.deleteSession',
   CHAT_REPLACE_ALL_FOR_NOTE: 'chat.replaceAllForNote',
+  // Meeting recordings (transcript persistence per note)
+  RECORDINGS_LIST: 'recordings.list',
+  RECORDINGS_CREATE: 'recordings.create',
+  RECORDINGS_UPDATE: 'recordings.update',
+  RECORDINGS_DELETE: 'recordings.delete',
   // Folders (filesystem-style note management)
   FOLDERS_LIST: 'folders.list',
   FOLDERS_CREATE: 'folders.create',
