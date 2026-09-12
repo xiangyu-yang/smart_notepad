@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { router } from '../App';
-import { useSettingsStore } from '../stores/useSettingsStore';
+import { useSettingsStore, CONTEXT_OPTIONS, recommendContext } from '../stores/useSettingsStore';
 import { useNoteStore } from '../stores/useNoteStore';
 import { useToast } from '../hooks/useToast';
 import IconButton from '../components/IconButton';
@@ -162,6 +162,7 @@ export default function SettingsPage() {
   const storeBaseUrl = useSettingsStore((s) => s.baseUrl);
   const storeApiKey = useSettingsStore((s) => s.apiKey);
   const storeModel = useSettingsStore((s) => s.model);
+  const storeContextByModel = useSettingsStore((s) => s.contextByModel);
   const storeTranscribeBaseUrl = useSettingsStore((s) => s.transcribeBaseUrl);
   const storeTranscribeApiKey = useSettingsStore((s) => s.transcribeApiKey);
   const storeTranscribeModel = useSettingsStore((s) => s.transcribeModel);
@@ -170,6 +171,7 @@ export default function SettingsPage() {
   const [baseUrl, setBaseUrl] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [model, setModel] = useState('');
+  const [contextByModel, setContextByModel] = useState<Record<string, number>>({});
   const [transcribeBaseUrl, setTranscribeBaseUrl] = useState('');
   const [transcribeApiKey, setTranscribeApiKey] = useState('');
   const [transcribeModel, setTranscribeModel] = useState('');
@@ -202,12 +204,13 @@ export default function SettingsPage() {
       setBaseUrl(storeBaseUrl);
       setApiKey(storeApiKey);
       setModel(storeModel);
+      setContextByModel(storeContextByModel);
       setTranscribeBaseUrl(storeTranscribeBaseUrl);
       setTranscribeApiKey(storeTranscribeApiKey);
       setTranscribeModel(storeTranscribeModel);
       setTranscribeLanguage(storeTranscribeLanguage);
     }
-  }, [storeLoaded, storeBaseUrl, storeApiKey, storeModel, storeTranscribeBaseUrl, storeTranscribeApiKey, storeTranscribeModel, storeTranscribeLanguage]);
+  }, [storeLoaded, storeBaseUrl, storeApiKey, storeModel, storeContextByModel, storeTranscribeBaseUrl, storeTranscribeApiKey, storeTranscribeModel, storeTranscribeLanguage]);
 
   // When Base URL changes, debounce fetch available models
   useEffect(() => {
@@ -239,6 +242,7 @@ export default function SettingsPage() {
     baseUrl !== storeBaseUrl ||
     apiKey !== storeApiKey ||
     model !== storeModel ||
+    JSON.stringify(contextByModel) !== JSON.stringify(storeContextByModel) ||
     transcribeBaseUrl !== storeTranscribeBaseUrl ||
     transcribeApiKey !== storeTranscribeApiKey ||
     transcribeModel !== storeTranscribeModel ||
@@ -269,7 +273,8 @@ export default function SettingsPage() {
       await saveSettings({
         baseUrl: baseUrl.trim(),
         apiKey: apiKey.trim(),
-        model: model.trim() || 'gpt-4o-mini'
+        model: model.trim() || 'gpt-4o-mini',
+        contextByModel
       });
       await saveTranscribe({
         baseUrl: transcribeBaseUrl.trim(),
@@ -455,6 +460,80 @@ export default function SettingsPage() {
                   ? '从下拉框选择已检测到的模型，或在右侧手动输入自定义名称'
                   : '填写 Ollama Base URL 后自动列出可用模型；其他 API 可手动输入'}
               </div>
+            </div>
+
+            {/* 按模型的上下文长度设置（Ollama options.num_ctx） */}
+            <div>
+              <label className="block text-sm font-medium text-ink-700 mb-1.5">
+                上下文长度 Context
+              </label>
+              {(() => {
+                const activeModelName = model.trim() || storeModel;
+                const recommendedCtx = activeModelName ? recommendContext(activeModelName) : 0;
+                const currentCtx = activeModelName ? (contextByModel[activeModelName] ?? 0) : 0;
+                const customizedModels = Object.entries(contextByModel).filter(([, v]) => v > 0);
+                const autoLabel = recommendedCtx > 0
+                  ? `自动（推荐 ${recommendedCtx}）`
+                  : '自动（跟随 Ollama 默认）';
+                return (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={currentCtx}
+                        disabled={!activeModelName}
+                        onChange={(e) => {
+                          const value = Number(e.target.value);
+                          const name = activeModelName;
+                          if (!name) return;
+                          setContextByModel((prev) => ({ ...prev, [name]: value }));
+                        }}
+                        className="flex-1 h-10 px-3.5 rounded-xl bg-white border border-paper-300/80 hover:border-paper-300 focus:border-sage-500 focus:ring-2 focus:ring-sage-500/30 outline-none text-sm text-ink-900 transition-all cursor-pointer disabled:bg-paper-100 disabled:cursor-not-allowed"
+                      >
+                        {CONTEXT_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.value === 0 ? autoLabel : opt.label}
+                          </option>
+                        ))}
+                      </select>
+                      {activeModelName && (
+                        <span className="shrink-0 max-w-[220px] truncate text-xs text-ink-400 font-mono" title={activeModelName}>
+                          {activeModelName}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-ink-300 mt-1.5 px-1">
+                      对上方选中的模型生效，切换模型时此处显示该模型的独立配置；仅对本地 Ollama 请求传递 num_ctx
+                    </div>
+                    {customizedModels.length > 0 && (
+                      <div className="mt-2.5 flex flex-wrap gap-1.5">
+                        {customizedModels.map(([name, ctx]) => (
+                          <span
+                            key={name}
+                            className="inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-lg bg-sage-50 border border-sage-200 text-xs text-sage-700"
+                          >
+                            <span className="font-mono max-w-[180px] truncate" title={name}>{name}</span>
+                            <span className="text-sage-500">{ctx}</span>
+                            <button
+                              type="button"
+                              title="恢复自动"
+                              onClick={() => {
+                                setContextByModel((prev) => {
+                                  const next = { ...prev };
+                                  delete next[name];
+                                  return next;
+                                });
+                              }}
+                              className="no-drag w-[18px] h-[18px] flex items-center justify-center rounded-md text-sage-500 hover:bg-sage-100 hover:text-sage-800 transition-colors leading-none"
+                            >
+                              ×
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
 
             {/* Connection Test */}

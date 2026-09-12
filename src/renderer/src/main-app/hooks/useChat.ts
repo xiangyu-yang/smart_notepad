@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
-import { useSettingsStore } from '../stores/useSettingsStore';
+import { useSettingsStore, resolveNumCtx } from '../stores/useSettingsStore';
 import { useChatStore, type SessionState, flushChatPersistenceForNote } from '../stores/useChatStore';
 import { useNoteStore } from '../stores/useNoteStore';
 import { useUiStore } from '../stores/useUiStore';
@@ -77,6 +77,7 @@ export function useChat(): UseChatReturn {
   const baseUrl = useSettingsStore((s) => s.baseUrl);
   const apiKey = useSettingsStore((s) => s.apiKey);
   const model = useSettingsStore((s) => s.model);
+  const contextByModel = useSettingsStore((s) => s.contextByModel);
   const currentNoteId = useNoteStore((s) => s.currentId);
   const reasoningEnabled = useUiStore((s) => s.reasoningEnabled);
   const previousNoteIdRef = useRef<string | null | undefined>(undefined);
@@ -298,6 +299,15 @@ export function useChat(): UseChatReturn {
       //   关 → think: false，跳过思考直接输出答案
       body.think = reasoningEnabled;
 
+      // 按模型注入上下文长度（Ollama options.num_ctx，请求级覆盖服务默认）。
+      // 仅对本地 Ollama 生效：云端 OpenAI 兼容 API 不识别 options 字段。
+      // numCtx=0 表示跟随 Ollama 默认，不传该参数。
+      const isLocalOllama = /(localhost|127\.0\.0\.1|\.local|11434)/i.test(baseUrl);
+      const numCtx = resolveNumCtx(model, contextByModel);
+      if (isLocalOllama && numCtx > 0) {
+        body.options = { num_ctx: numCtx };
+      }
+
       const controller = new AbortController();
       window.__chatAbort = controller;
 
@@ -335,6 +345,14 @@ export function useChat(): UseChatReturn {
           const msg = data?.message;
           const content = msg?.content ?? '';
           const reasoning = msg?.thinking ?? '';
+          // 空响应检测：content 和 thinking 均为空，说明模型未正常输出
+          // 常见原因：模型权重损坏/未完整加载/显存不足导致 Ollama 静默返回空
+          if (!content.trim() && !reasoning.trim()) {
+            throw new Error(
+              `模型 "${model}" 返回了空响应。可能原因：模型未完整加载、显存/内存不足、或模型文件损坏。\n` +
+              `建议：1) 重启 Ollama 服务  2) 重新拉取模型（ollama rm ${model} && ollama pull ${model}）  3) 切换到其他可用模型`
+            );
+          }
           useChatStore.getState().updateMessage(noteId, sessionId, assistantId, {
             content,
             ...(reasoning ? { reasoning } : {})
@@ -348,6 +366,14 @@ export function useChat(): UseChatReturn {
           let accumulated = '';
           let accumulatedReasoning = '';
           let firstTokenLogged = false;
+          // 首 token 超时检测：连接已成功但模型迟迟不输出内容
+          // 超过 60s 仍未收到任何有效 token，视为模型异常
+          const FIRST_TOKEN_TIMEOUT_MS = 60_000;
+          const firstTokenTimer = setTimeout(() => {
+            if (!accumulated && !accumulatedReasoning) {
+              controller.abort();
+            }
+          }, FIRST_TOKEN_TIMEOUT_MS);
 
           try {
             while (true) {
@@ -391,11 +417,30 @@ export function useChat(): UseChatReturn {
               }
             }
           } finally {
+            clearTimeout(firstTokenTimer);
             try {
               reader.releaseLock();
             } catch {
               // ignore
             }
+          }
+          // 流式结束后的空响应检测：
+          // 整个流读完但 accumulated 和 accumulatedReasoning 均为空，
+          // 说明 Ollama 返回了空流（HTTP 200 但无任何 token）
+          if (!accumulated.trim() && !accumulatedReasoning.trim()) {
+            throw new Error(
+              `模型 "${model}" 返回了空响应（流式连接成功但无任何输出）。可能原因：\n` +
+              `1. 模型未完整加载或显存/内存不足\n` +
+              `2. 模型文件损坏\n` +
+              `3. Ollama 版本与该模型不兼容\n` +
+              `建议：重启 Ollama 服务，或重新拉取模型（ollama rm ${model} && ollama pull ${model}），或切换到其他可用模型`
+            );
+          }
+          // 首 token 超时被 abort：连接成功但 60s 内无任何输出
+          if (firstTokenLogged && !accumulated && !accumulatedReasoning && controller.signal.aborted) {
+            throw new Error(
+              `模型 "${model}" 连接成功但 ${FIRST_TOKEN_TIMEOUT_MS / 1000}s 内无任何输出。可能模型加载异常或显存不足，请尝试切换其他模型或重启 Ollama。`
+            );
           }
         }
       } catch (e: unknown) {
@@ -412,7 +457,7 @@ export function useChat(): UseChatReturn {
         useChatStore.getState().setStreamingId(noteId, sessionId, null);
       }
     },
-    [baseUrl, apiKey, model, reasoningEnabled]
+    [baseUrl, apiKey, model, reasoningEnabled, contextByModel]
   );
 
   return useMemo(
