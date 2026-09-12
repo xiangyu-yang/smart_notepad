@@ -42,7 +42,9 @@ export function initializeDatabase(): Database.Database {
       title TEXT NOT NULL DEFAULT '',
       content TEXT NOT NULL DEFAULT '',
       created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      updated_at INTEGER NOT NULL,
+      is_encrypted INTEGER NOT NULL DEFAULT 0,
+      encryption_meta TEXT NOT NULL DEFAULT ''
     );
 
     CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC);
@@ -172,6 +174,26 @@ export function initializeDatabase(): Database.Database {
     }
   } catch (e) {
     console.warn('[db] migration: add notes.folder_id column failed:', e);
+  }
+
+  // --- 迁移：notes 表补加密列 ---
+  // is_encrypted: 0=明文（默认），1=标题/内容均为密文
+  // encryption_meta: JSON { v, s }，保存 scrypt 盐（盐非机密，但必须随密文持久化）
+  // 用户密码本身不落库，重启后凭原密码 + 盐派生密钥，经 GCM 认证标签校验。
+  try {
+    const noteEncCols = db.prepare("PRAGMA table_info(notes)").all() as Array<{ name: string }>;
+    if (noteEncCols.length > 0) {
+      if (!noteEncCols.some((c) => c.name === 'is_encrypted')) {
+        db.exec('ALTER TABLE notes ADD COLUMN is_encrypted INTEGER NOT NULL DEFAULT 0');
+        console.log('[db] migration: add notes.is_encrypted column');
+      }
+      if (!noteEncCols.some((c) => c.name === 'encryption_meta')) {
+        db.exec("ALTER TABLE notes ADD COLUMN encryption_meta TEXT NOT NULL DEFAULT ''");
+        console.log('[db] migration: add notes.encryption_meta column');
+      }
+    }
+  } catch (e) {
+    console.warn('[db] migration: add notes encryption columns failed:', e);
   }
 
   dbInstance = db;

@@ -2,6 +2,11 @@ import { randomUUID } from 'node:crypto';
 import type { Note } from '@shared/types';
 import { getDb } from '../init';
 import { AttachmentRepository } from './AttachmentRepository';
+import type { EncryptedNotePayload } from '../../utils/noteCrypto';
+
+/** 对外查询列：is_encrypted 暴露给渲染层决定锁定 UI；encryption_meta（盐）不对外 */
+const PUBLIC_COLUMNS =
+  'id, title, content, created_at, updated_at, folder_id, is_encrypted';
 
 /**
  * NoteRepository - 仓储模式：封装 notes 表所有访问
@@ -11,7 +16,7 @@ export class NoteRepository {
   static list(): Note[] {
     const db = getDb();
     return db
-      .prepare('SELECT id, title, content, created_at, updated_at, folder_id FROM notes ORDER BY updated_at DESC')
+      .prepare(`SELECT ${PUBLIC_COLUMNS} FROM notes ORDER BY updated_at DESC`)
       .all() as Note[];
   }
 
@@ -19,7 +24,7 @@ export class NoteRepository {
     const db = getDb();
     return (
       (db
-        .prepare('SELECT id, title, content, created_at, updated_at, folder_id FROM notes WHERE id = ?')
+        .prepare(`SELECT ${PUBLIC_COLUMNS} FROM notes WHERE id = ?`)
         .get(id) as Note | undefined) ?? null
     );
   }
@@ -28,8 +33,61 @@ export class NoteRepository {
     const db = getDb();
     const like = `%${keyword}%`;
     return db
-      .prepare('SELECT id, title, content, created_at, updated_at, folder_id FROM notes WHERE title LIKE ? ORDER BY updated_at DESC')
+      .prepare(
+        `SELECT ${PUBLIC_COLUMNS} FROM notes WHERE title LIKE ? ORDER BY updated_at DESC`
+      )
       .all(like) as Note[];
+  }
+
+  /**
+   * 读取加解密所需的完整行（含 encryption_meta 盐）。
+   * 仅供主进程加解密 IPC 使用，不经过 contextBridge 暴露。
+   */
+  static getCryptoRow(
+    id: string
+  ): (Note & { encryption_meta: string }) | null {
+    const db = getDb();
+    return (
+      (db
+        .prepare(
+          `SELECT ${PUBLIC_COLUMNS}, encryption_meta FROM notes WHERE id = ?`
+        )
+        .get(id) as (Note & { encryption_meta: string }) | undefined) ?? null
+    );
+  }
+
+  /**
+   * 写入密文：标题/正文替换为 envelope，置 is_encrypted=1，保存盐到 meta。
+   * 刻意不更新 updated_at：加密是安全状态变更而非内容编辑，
+   * 避免列表中的记事因加密/解密跳到最前。
+   */
+  static setEncrypted(id: string, payload: EncryptedNotePayload): Note | null {
+    const db = getDb();
+    const tx = db.transaction(() => {
+      db.prepare(
+        `UPDATE notes
+         SET title = @title, content = @content,
+             is_encrypted = 1, encryption_meta = @meta
+         WHERE id = @id AND is_encrypted = 0`
+      ).run({ id, title: payload.title, content: payload.content, meta: payload.meta });
+    });
+    tx();
+    return this.get(id);
+  }
+
+  /** 写回明文：置 is_encrypted=0 并清空 meta。同样不更新 updated_at。 */
+  static setDecrypted(id: string, title: string, content: string): Note | null {
+    const db = getDb();
+    const tx = db.transaction(() => {
+      db.prepare(
+        `UPDATE notes
+         SET title = @title, content = @content,
+             is_encrypted = 0, encryption_meta = ''
+         WHERE id = @id AND is_encrypted = 1`
+      ).run({ id, title, content });
+    });
+    tx();
+    return this.get(id);
   }
 
   static create(input: { title: string; content: string; folder_id?: string | null }): Note {

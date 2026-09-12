@@ -8,6 +8,8 @@ export interface Note {
   updated_at: number;
   /** 所属文件夹 id；null/undefined 表示根目录（向后兼容老数据） */
   folder_id?: string | null;
+  /** 加密标记：1=标题/内容均为密文（AES-256-GCM envelope），0/undefined=明文 */
+  is_encrypted?: number;
 }
 
 export interface Folder {
@@ -38,6 +40,12 @@ export interface SettingsMap {
   'llm.baseUrl'?: string;
   'llm.apiKey'?: string;
   'llm.model'?: string;
+  /**
+   * 按模型配置的上下文长度（Ollama options.num_ctx）。
+   * key 为模型名，value 为 token 数；0 表示跟随 Ollama 默认。
+   * 未配置的模型由应用按显存预算给出推荐值（见 useSettingsStore.recommendContext）。
+   */
+  'llm.contextByModel'?: Record<string, number>;
   /** 文件夹展开状态：folderId → 是否展开。用户偏好持久化到 SQLite，重启/清缓存不丢 */
   'ui.folderExpanded'?: Record<string, boolean>;
   /** 会议录音转写服务配置（OpenAI 兼容 /audio/transcriptions 端点） */
@@ -99,6 +107,14 @@ export interface IpcApi {
   'notes.save': (note: Partial<Note> & { id?: string }) => Promise<Note>;
   'notes.delete': (id: string) => Promise<boolean>;
   'notes.move': (noteId: string, folderId: string | null) => Promise<Note | null>;
+  /**
+   * 用用户密码加密整篇记事（标题 + 正文）。
+   * 主进程 scrypt 派生密钥 + AES-256-GCM；密码不落库。
+   * 失败时 reject，error.message 见 NOTE_CRYPTO_ERRORS。
+   */
+  'notes.encrypt': (payload: { id: string; password: string }) => Promise<Note>;
+  /** 用加密时的同一密码解密；密码错误 reject NOTE_CRYPTO_ERRORS.BAD_PASSWORD */
+  'notes.decrypt': (payload: { id: string; password: string }) => Promise<Note>;
   'notes.exportPdf': (payload: {
     /** PDF 默认文件名（不含扩展名） */
     defaultName: string;

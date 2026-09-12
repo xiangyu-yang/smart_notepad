@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import type { Note } from '@shared/types';
+import { NOTE_CRYPTO_ERRORS } from '@shared/constants';
 import { useNavigate } from 'react-router-dom';
 import { useNoteStore } from '../stores/useNoteStore';
 import { useUiStore } from '../stores/useUiStore';
+import { useEditorStore } from '../stores/useEditorStore';
 import { useConfirm } from '../hooks/useConfirm';
 import { useToast } from '../hooks/useToast';
+import { usePasswordPrompt } from '../hooks/usePasswordPrompt';
 import { useNavigateSafe } from '../hooks/useNavigateSafe';
 import { formatShortDateTime } from '../utils/format-time';
 import { summarize, stripMarkdown } from '../utils/text';
+import { getCryptoErrorCode, getIpcErrorMessage } from '../utils/ipc-error';
 
 interface NoteCardProps {
   note: Note;
@@ -34,11 +39,17 @@ export default function NoteCard({ note, depth = 0 }: NoteCardProps) {
   const navigateIfSafe = useNavigateSafe();
   const currentId = useNoteStore((s) => s.currentId);
   const removeNote = useNoteStore((s) => s.remove);
+  const saveNote = useNoteStore((s) => s.save);
+  const encryptNote = useNoteStore((s) => s.encrypt);
+  const decryptNote = useNoteStore((s) => s.decrypt);
   const sidebarSearch = useUiStore((s) => s.sidebarSearch);
   const confirm = useConfirm();
   const toast = useToast();
+  const askPassword = usePasswordPrompt();
+  const [cryptoBusy, setCryptoBusy] = useState(false);
 
   const isActive = currentId === note.id;
+  const encrypted = Boolean(note.is_encrypted);
 
   // 拖拽源：把记事拖入文件夹或拖到空白处移回根目录
   const onDragStart = (e: React.DragEvent) => {
@@ -79,8 +90,95 @@ export default function NoteCard({ note, depth = 0 }: NoteCardProps) {
     }
   };
 
-  const summary = summarize(stripMarkdown(note.content ?? ''), 80);
-  const displayTitle = note.title?.trim() || '未命名记事';
+  /**
+   * 加密当前正打开的记事前，先把编辑器未落盘的内容保存，
+   * 否则主进程只会加密 DB 里的旧内容，随后的自动保存还可能用明文覆盖密文。
+   */
+  const flushActiveEditorIfDirty = async () => {
+    if (!isActive) return;
+    const st = useEditorStore.getState();
+    const dirty =
+      st.loaded && (st.title !== st.pristineTitle || st.content !== st.pristineContent);
+    if (dirty) {
+      const saved = await saveNote(note.id, { title: st.title, content: st.content });
+      st.markSaved(saved);
+    }
+  };
+
+  const handleToggleEncryption = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (cryptoBusy) return;
+
+    try {
+      if (!encrypted) {
+        // ---- 加密 ----
+        await flushActiveEditorIfDirty();
+        const password = await askPassword({
+          title: '加密记事',
+          description:
+            '将加密整篇记事的标题与正文。请牢记密码，密码一旦丢失，密文在数学上无法恢复。',
+          placeholder: '设置加密密码',
+          confirmText: '加密'
+        });
+        if (password === null) return;
+        setCryptoBusy(true);
+        await encryptNote(note.id, password);
+        toast.success('已加密');
+      } else {
+        // ---- 解密：密码错误时保留弹窗并允许反复重试，取消则退出 ----
+        let password: string | null = await askPassword({
+          title: '解密记事',
+          description: '请输入加密这篇记事时设置的密码。',
+          placeholder: '输入密码',
+          confirmText: '解密'
+        });
+        while (password !== null) {
+          setCryptoBusy(true);
+          try {
+            await decryptNote(note.id, password);
+            toast.success('已解密');
+            return;
+          } catch (err) {
+            // invoke reject 会被 Electron 包装，用归一化工具识别真实错误码
+            const code = getCryptoErrorCode(err);
+            if (code === NOTE_CRYPTO_ERRORS.BAD_PASSWORD) {
+              password = await askPassword({
+                title: '解密记事',
+                description: '请输入加密这篇记事时设置的密码。',
+                placeholder: '输入密码',
+                confirmText: '解密',
+                error: '密码错误，请重新输入'
+              });
+            } else if (code === NOTE_CRYPTO_ERRORS.NOT_FOUND) {
+              toast.error('记事不存在');
+              return;
+            } else {
+              toast.error(`解密失败：${getIpcErrorMessage(err) || '未知错误'}`);
+              return;
+            }
+          } finally {
+            setCryptoBusy(false);
+          }
+        }
+      }
+    } catch (err) {
+      const code = getCryptoErrorCode(err);
+      if (code === NOTE_CRYPTO_ERRORS.ALREADY_ENCRYPTED) {
+        toast.error('该记事已处于加密状态');
+      } else if (code === NOTE_CRYPTO_ERRORS.NOT_FOUND) {
+        toast.error('记事不存在');
+      } else {
+        toast.error(`操作失败：${getIpcErrorMessage(err) || '未知错误'}`);
+      }
+    } finally {
+      setCryptoBusy(false);
+    }
+  };
+
+  const summary = encrypted ? '' : summarize(stripMarkdown(note.content ?? ''), 80);
+  const displayTitle = encrypted
+    ? '已加密记事'
+    : note.title?.trim() || '未命名记事';
 
   return (
     <div
@@ -101,6 +199,20 @@ export default function NoteCard({ note, depth = 0 }: NoteCardProps) {
     >
       <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity duration-150 flex gap-1 z-10 bg-paper-50/80 backdrop-blur-sm rounded-lg px-1 py-0.5">
         <button
+          onClick={handleToggleEncryption}
+          disabled={cryptoBusy}
+          title={encrypted ? '解密' : '加密'}
+          className={[
+            'no-drag w-7 h-7 rounded-md hover:bg-paper-200 flex items-center justify-center transition-colors text-sm',
+            encrypted
+              ? 'text-amber-600 hover:text-amber-700'
+              : 'text-ink-500 hover:text-sage-700',
+            cryptoBusy ? 'opacity-50 cursor-wait' : ''
+          ].join(' ')}
+        >
+          {cryptoBusy ? '⏳' : encrypted ? '🔓' : '🔒'}
+        </button>
+        <button
           onClick={handleDelete}
           title="删除"
           className="no-drag w-7 h-7 rounded-md hover:bg-paper-200 flex items-center justify-center text-ink-500 hover:text-rose-600 transition-colors text-sm"
@@ -110,11 +222,26 @@ export default function NoteCard({ note, depth = 0 }: NoteCardProps) {
       </div>
 
       <div className="pr-14 flex flex-col gap-0 h-full">
-        <div className="text-[15px] font-semibold text-ink-900 truncate leading-snug">
-          {highlight(displayTitle, sidebarSearch.trim())}
+        <div
+          className={[
+            'text-[15px] font-semibold truncate leading-snug flex items-center gap-1.5',
+            encrypted ? 'text-ink-500' : 'text-ink-900'
+          ].join(' ')}
+        >
+          {encrypted && <span className="shrink-0" title="已加密">🔒</span>}
+          <span className="truncate">
+            {encrypted ? displayTitle : highlight(displayTitle, sidebarSearch.trim())}
+          </span>
         </div>
         <div className="mt-1.5 text-[13px] text-ink-500 leading-relaxed min-h-[40px] flex-1">
-          {summary || (
+          {encrypted ? (
+            <span className="text-ink-400 italic flex items-center gap-1">
+              <span>🔐</span>
+              <span>内容已加密，点击卡片输入密码解锁</span>
+            </span>
+          ) : summary ? (
+            summary
+          ) : (
             <span className="text-ink-300 italic">暂无内容</span>
           )}
         </div>

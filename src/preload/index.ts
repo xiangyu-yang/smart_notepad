@@ -29,6 +29,10 @@ const ipcApi: IpcApi = {
   'notes.delete': (id) => invoke(IPC_CHANNELS.NOTES_DELETE, id),
   'notes.move': (noteId, folderId) =>
     invoke<Note | null>(IPC_CHANNELS.NOTES_MOVE, noteId, folderId),
+  'notes.encrypt': (payload) =>
+    invoke<Note>(IPC_CHANNELS.NOTES_ENCRYPT, payload),
+  'notes.decrypt': (payload) =>
+    invoke<Note>(IPC_CHANNELS.NOTES_DECRYPT, payload),
   [IPC_CHANNELS.NOTES_EXPORT_PDF]: (payload) =>
     invoke<{ success: boolean; canceled: boolean; path?: string; error?: string }>(
       IPC_CHANNELS.NOTES_EXPORT_PDF,

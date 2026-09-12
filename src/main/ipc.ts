@@ -13,6 +13,7 @@ import {
 } from './db/repositories/AttachmentRepository';
 import { WindowManager } from './window/WindowManager';
 import * as OllamaService from './services/OllamaService';
+import { encryptNote, decryptNote, NOTE_CRYPTO_ERRORS } from './utils/noteCrypto';
 import { AttachmentFileServer } from './services/AttachmentFileServer';
 import { KkFileViewService, KKFILEVIEW_DEFAULT_PORT } from './services/KkFileViewService';
 
@@ -40,6 +41,14 @@ export function registerIpcHandlers(): void {
     IPC_CHANNELS.NOTES_SAVE,
     (_e, payload: Partial<Note> & { id?: string }): Note => {
       try {
+        // 防御：加密记事不允许通过普通保存通道写入明文（UI 层编辑器已锁定，
+        // 此 guard 兜底迟到的自动保存/关闭前保存等异步路径）
+        if (payload.id) {
+          const existing = NoteRepository.get(payload.id);
+          if (existing?.is_encrypted) {
+            throw new Error(NOTE_CRYPTO_ERRORS.LOCKED);
+          }
+        }
         const note = NoteRepository.upsert(payload);
         // 向主窗口广播更新
         WindowManager.shared.broadcastNoteUpdated(note);
@@ -73,6 +82,59 @@ export function registerIpcHandlers(): void {
       } catch (e) {
         console.error('[ipc] notes.move error:', e);
         return null;
+      }
+    }
+  );
+
+  // ---------- note encryption / decryption ----------
+  // 加解密全部在主进程完成（node:crypto），密码经 IPC 传入后只存在于内存，
+  // 不落库、不广播；广播的 NOTE_UPDATED 载荷只含密文与 is_encrypted 标记。
+  ipcMain.handle(
+    IPC_CHANNELS.NOTES_ENCRYPT,
+    (_e, payload: { id: string; password: string }): Note => {
+      try {
+        if (!payload || typeof payload.password !== 'string' || payload.password.length === 0) {
+          throw new Error('密码不能为空');
+        }
+        const row = NoteRepository.getCryptoRow(payload.id);
+        if (!row) throw new Error(NOTE_CRYPTO_ERRORS.NOT_FOUND);
+        if (row.is_encrypted) throw new Error(NOTE_CRYPTO_ERRORS.ALREADY_ENCRYPTED);
+
+        const encrypted = encryptNote(row.title ?? '', row.content ?? '', payload.password);
+        const note = NoteRepository.setEncrypted(payload.id, encrypted);
+        if (!note) throw new Error(NOTE_CRYPTO_ERRORS.NOT_FOUND);
+        WindowManager.shared.broadcastNoteUpdated(note);
+        return note;
+      } catch (e) {
+        console.error('[ipc] notes.encrypt error:', e instanceof Error ? e.message : e);
+        throw e;
+      }
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.NOTES_DECRYPT,
+    (_e, payload: { id: string; password: string }): Note => {
+      try {
+        if (!payload || typeof payload.password !== 'string' || payload.password.length === 0) {
+          throw new Error('密码不能为空');
+        }
+        const row = NoteRepository.getCryptoRow(payload.id);
+        if (!row) throw new Error(NOTE_CRYPTO_ERRORS.NOT_FOUND);
+        if (!row.is_encrypted) throw new Error(NOTE_CRYPTO_ERRORS.NOT_ENCRYPTED);
+
+        // decryptNote 在密码错误/密文损坏时抛 BAD_PASSWORD（GCM 认证失败）
+        const plain = decryptNote(
+          { title: row.title, content: row.content, meta: row.encryption_meta },
+          payload.password
+        );
+        const note = NoteRepository.setDecrypted(payload.id, plain.title, plain.content);
+        if (!note) throw new Error(NOTE_CRYPTO_ERRORS.NOT_FOUND);
+        WindowManager.shared.broadcastNoteUpdated(note);
+        return note;
+      } catch (e) {
+        console.error('[ipc] notes.decrypt error:', e instanceof Error ? e.message : e);
+        throw e;
       }
     }
   );

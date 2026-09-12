@@ -36,6 +36,9 @@ export const IPC_CHANNELS = {
   FOLDERS_MOVE: 'folders.move',
   // Move a note into a folder (folder_id null = root)
   NOTES_MOVE: 'notes.move',
+  // Note encryption / decryption (scrypt + AES-256-GCM, password never stored)
+  NOTES_ENCRYPT: 'notes.encrypt',
+  NOTES_DECRYPT: 'notes.decrypt',
   // Export current note to PDF
   NOTES_EXPORT_PDF: 'notes.exportPdf',
   // Attachments
@@ -51,3 +54,17 @@ export const IPC_CHANNELS = {
 } as const;
 
 export const DB_FILE = 'smart_notepad.db';
+
+/** 记事加解密 IPC reject 错误码（error.message），渲染层据此映射中文提示 */
+export const NOTE_CRYPTO_ERRORS = {
+  /** 记事不存在 */
+  NOT_FOUND: 'NOTE_NOT_FOUND',
+  /** 目标已是加密态，无需重复加密 */
+  ALREADY_ENCRYPTED: 'NOTE_ALREADY_ENCRYPTED',
+  /** 目标是明文态，无从解密 */
+  NOT_ENCRYPTED: 'NOTE_NOT_ENCRYPTED',
+  /** 密码错误（或密文损坏/被篡改，GCM 认证失败） */
+  BAD_PASSWORD: 'BAD_PASSWORD',
+  /** 加密记事禁止通过普通保存通道写明文，须先解密 */
+  LOCKED: 'NOTE_LOCKED'
+} as const;

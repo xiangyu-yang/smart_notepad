@@ -12,6 +12,10 @@ interface NoteState {
   save: (noteId: string, patch: Partial<Note>) => Promise<Note>;
   /** 移动记事到指定文件夹（folder_id 为 null 表示根目录） */
   move: (noteId: string, folderId: string | null) => Promise<Note | null>;
+  /** 用密码加密整篇记事（标题+正文）；主进程成功后会广播，这里再本地兜底更新 */
+  encrypt: (noteId: string, password: string) => Promise<Note>;
+  /** 用密码解密；密码错误时 reject（message=BAD_PASSWORD），由调用方提示重试 */
+  decrypt: (noteId: string, password: string) => Promise<Note>;
   remove: (id: string) => Promise<boolean>;
   setCurrentId: (id: string | null) => void;
   _updateOrPrepend: (note: Note) => void;
@@ -81,6 +85,18 @@ export const useNoteStore = create<NoteState>((set, get) => ({
     if (updated) {
       get()._updateOrPrepend(updated);
     }
+    return updated;
+  },
+
+  encrypt: async (noteId, password) => {
+    const updated = await window.api['notes.encrypt']({ id: noteId, password });
+    get()._updateOrPrepend(updated);
+    return updated;
+  },
+
+  decrypt: async (noteId, password) => {
+    const updated = await window.api['notes.decrypt']({ id: noteId, password });
+    get()._updateOrPrepend(updated);
     return updated;
   },
 

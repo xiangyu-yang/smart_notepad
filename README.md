@@ -35,6 +35,9 @@
 - **🔒 安全 IPC 桥**：启用 `contextIsolation` 并关闭 `nodeIntegration`，IPC 通道以常量白名单约束，渲染进程不具备 Node 能力
 
   <br />
+- **🔐 端到端记事加密**：加密在主进程内完成，密码仅存于内存、绝不落库；scrypt（N=2¹⁵，内存硬化、抗 GPU 暴力破解）从"用户密码 + 记事级随机盐"派生 256-bit 密钥，AES-256-GCM 分别加密标题与正文（独立 IV + GMAC 认证标签），密码错误与密文篡改在数学上不可区分；密文以自描述信封 `enc:v1:` 持久化，加密状态随 SQLite 跨重启保持
+
+  <br />
 - **🧩 工程化代码质量**：仓储模式事务化写入、服务层按单一职责拆分、Zustand 多 store 边界清晰、TypeScript 严格模式下零 `any` 与零 `require()`
 
   <br />
@@ -66,6 +69,16 @@
 - **自动时间戳**：自动记录每篇记事的创建与最后修改时间
 - **未保存提示**：编辑器顶部红点 + 底部"有未保存修改"脉冲指示
 - **自动保存**：切换记事时自动保存当前内容，避免数据丢失
+
+### 🔐 记事加密
+
+- **整篇覆盖**：一次加密同时覆盖记事标题与正文，卡片标题/摘要即刻掩码为"已加密记事 / 内容已加密"
+- **行业标准算法**：scrypt 内存硬化 KDF（N=32768, r=8, p=1）派生密钥 + AES-256-GCM 认证加密；每篇记事独立随机盐，标题与正文使用各自独立的 IV 与认证标签
+- **密码不落库**：用户密码仅存在于内存，数据库只保存盐与密文；解密必须输入加密时的同一密码，GCM 认证失败即拒绝，密码错误可在弹窗内反复重试
+- **状态持久化**：加密标记与密文存入 SQLite，应用重启后加密/解密状态与上次关闭时完全一致
+- **锁定页保护**：打开加密记事进入全屏锁定页，密文绝不进入编辑器状态，AI 面板与会议录音面板同时禁用
+- **防覆盖守卫**：加密记事拒绝普通保存通道，迟到的自动保存无法用明文覆盖密文；加解密不更新修改时间，列表不重排
+- **使用方式**：悬浮记事卡片 → 删除按钮旁的 🔒/🔓 按钮 → 输入密码即完成加解密
 
 ### 📁 文件夹管理
 
@@ -111,6 +124,7 @@
 - **多会话管理**：每篇记事独立的对话历史，🔄 新对话不丢失旧会话
 - **跨重启持久化**：聊天会话与消息存入 SQLite，重启应用自动恢复
 - **插入到编辑器**：一键将 AI 回复插入到编辑器光标位置
+- **按模型配置上下文长度**：设置页可为每个模型单独指定 Ollama `options.num_ctx`，请求级覆盖服务默认值，无需依赖环境变量
 
 ### 🎙 会议录音与转写
 
@@ -123,9 +137,10 @@
 
 ### 🛡️ 数据安全
 
+- **记事加密**：scrypt + AES-256-GCM 端到端加密标题与正文，密码不落库，详见上文「🔐 记事加密」
 - **关闭守卫**：窗口关闭前检测未保存变更，提供 保存 / 不保存 / 取消 三选一
 - **离开守卫**：导航离开编辑页时同样检测脏状态
-- **Context Bridge**：渲染进程 `nodeIntegration` 关闭、`contextIsolation` 开启，IPC 通道白名单化
+- **Context Bridge**：渲染进程 `nodeIntegration` 关闭、`contextIsolation` 开启，IPC 通道白名单化；加解密仅在主进程执行，渲染进程不接触密钥派生原语
 
 ***
 
@@ -138,6 +153,7 @@
 | **状态管理**   | Zustand 4（多 store：note / folder / editor / chat / attachment / settings / ui） |
 | **样式**     | Tailwind CSS 3 + `@tailwindcss/typography`                                    |
 | **数据库**    | better-sqlite3（WAL 模式 + 外键级联）                                                 |
+| **记事加密**   | Node `crypto`：scrypt（N=32768, r=8, p=1）密钥派生 + AES-256-GCM 认证加密，零第三方依赖   |
 | **AI 接口**  | Ollama 原生 `/api/chat`（NDJSON 流式）                                              |
 | **语音转写** | whisper.cpp（本地 OpenAI 兼容 `/v1/audio/transcriptions` 端点，Mac Metal + ANE 加速）        |
 | **音频采集** | Web Audio API（AudioContext + ScriptProcessor，渲染进程内 PCM → WAV 编码）              |
@@ -167,10 +183,12 @@ smart_notepad/
 │   │   │       ├── ChatRepository.ts
 │   │   │       ├── RecordingRepository.ts  # 会议录音 CRUD（磁盘文件 + DB 元数据）
 │   │   │       └── SettingsRepository.ts
-│   │   └── services/
-│   │       ├── OllamaService.ts        # Ollama 健康检查 + 启动
-│   │       ├── KkFileViewService.ts   # kkFileView 容器生命周期 + trust 配置修补
-│   │       └── AttachmentFileServer.ts # 本地 HTTP 文件服务（供 kkFileView 拉取附件）
+│   │   ├── services/
+│   │   │   ├── OllamaService.ts        # Ollama 健康检查 + 启动
+│   │   │   ├── KkFileViewService.ts   # kkFileView 容器生命周期 + trust 配置修补
+│   │   │   └── AttachmentFileServer.ts # 本地 HTTP 文件服务（供 kkFileView 拉取附件）
+│   │   └── utils/
+│   │       └── noteCrypto.ts           # 记事加密：scrypt 派生 + AES-256-GCM 加解密
 │   │
 │   ├── preload/
 │   │   └── index.ts                   # contextBridge 安全桥
@@ -189,9 +207,11 @@ smart_notepad/
 │   │       │   │   │   │   ├── FolderTree.tsx # 顶层树容器（组装根级 + 递归）
 │   │   │   │   │   │   ├── AttachmentCard.tsx    # 附件卡片
 │   │   │   │   │   │   ├── AttachmentPreview.tsx # 附件预览（图片/PDF/Office/文本）
-│   │       │   │   │   │   ├── ConfirmDialog.tsx
-│   │       │   │   │   │   ├── PromptDialog.tsx  # 文本输入对话框
-│   │       │   │   │   │   ├── IconButton.tsx
+│   │   │   │   │   │   │   ├── ConfirmDialog.tsx
+│   │   │   │   │   │   ├── PromptDialog.tsx  # 文本输入对话框
+│   │   │   │   │   │   ├── PasswordDialog.tsx # 密码输入弹窗（显隐切换 + 错误回显）
+│   │   │   │   │   │   ├── LockedNoteView.tsx # 加密记事锁定页（内联解密）
+│   │   │   │   │   │   ├── IconButton.tsx
 │   │       │   │   │   │   ├── ReasoningBlock.tsx  # 思考过程折叠块
 │   │       │   │   │   │   └── Toast.tsx
 │   │       │   ├── pages/
@@ -206,6 +226,7 @@ smart_notepad/
 │   │       │   │   ├── useNavigateSafe.ts     # 安全导航
 │   │       │   │   ├── useConfirm.ts
 │   │       │   │   ├── usePrompt.ts           # 文本输入对话框
+│   │       │   │   ├── usePasswordPrompt.ts   # 密码输入弹窗（返回 Promise）
 │   │       │   │   └── useToast.ts
 │   │       │   ├── stores/
 │   │       │   │   ├── useNoteStore.ts
@@ -218,7 +239,8 @@ smart_notepad/
 │   │       │   │   └── useUiStore.ts          # UI 状态 + AI/录音面板互斥
 │   │       │   └── utils/
 │   │       │       ├── format-time.ts
-│   │       │       └── text.ts
+│   │       │       ├── text.ts
+│   │       │       └── ipc-error.ts         # 归一化 invoke 包装错误，识别加解密错误码
 │   │       └── styles/
 │   │           └── index.css
 │   │
@@ -273,6 +295,7 @@ pnpm run build:mac
 3. （Ollama 无需 API Key）填写 **API Key**
 4. **Model 名称**：填写 Ollama Base URL 后自动列出可用模型，或手动输入
 5. 点击 **测试连接** 验证；若 Ollama 未运行，可点击 **🚀 启动 Ollama** 自动拉起
+6. （可选）在 **按模型配置上下文长度** 区为不同模型分别设置 `num_ctx`，留空则使用 Ollama 服务默认值
 
 ### 配置会议录音转写
 
@@ -338,14 +361,14 @@ pnpm run build:mac
 
 | Store                | 职责                                              |
 | -------------------- | ----------------------------------------------- |
-| `useNoteStore`       | 记事列表、当前选中、CRUD、移动到文件夹                           |
+| `useNoteStore`       | 记事列表、当前选中、CRUD、移动到文件夹、加密/解密（IPC）                      |
 | `useFolderStore`     | 文件夹扁平数组、折叠状态（SQLite 持久化）、移动、当前选中作为新建落点          |
 | `useEditorStore`     | 编辑器内容、pristine 状态、光标选区（dirty 计算依据）              |
 | `useChatStore`       | 按 noteId 隔离的会话桶、流式状态、防抖持久化（350ms）               |
 | `useRecordingsStore` | 按当前记事的录音列表、IPC 持久化、删除清理                        |
 | `useAttachmentStore` | 附件列表、上传/删除、当前预览项                                |
 | `useSettingsStore`   | LLM 配置 + 转写服务配置（baseUrl / apiKey / model / language）   |
-| `useUiStore`         | 侧栏搜索、AI 面板开关与宽度、会议录音面板开关（与 AI 面板互斥）、Toast、Confirm/Prompt 对话框、思考过程开关 |
+| `useUiStore`         | 侧栏搜索、AI 面板开关与宽度、会议录音面板开关（与 AI 面板互斥）、Toast、Confirm/Prompt/Password 对话框、思考过程开关 |
 
 ### 聊天持久化策略
 
@@ -369,11 +392,13 @@ pnpm run build:mac
 -- 记事
 CREATE TABLE notes (
   id TEXT PRIMARY KEY,
-  title TEXT NOT NULL DEFAULT '',
-  content TEXT NOT NULL DEFAULT '',
+  title TEXT NOT NULL DEFAULT '',     -- 加密后为 enc:v1:<base64url> 信封
+  content TEXT NOT NULL DEFAULT '',   -- 同上
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
-  folder_id TEXT                      -- 所属文件夹；NULL 表示根目录（迁移加列）
+  folder_id TEXT,                     -- 所属文件夹；NULL 表示根目录（迁移加列）
+  is_encrypted INTEGER NOT NULL DEFAULT 0,  -- 1 = 标题与正文已加密（迁移加列）
+  encryption_meta TEXT NOT NULL DEFAULT ''  -- 加密元数据 JSON：{v:1,s:saltBase64}（迁移加列，密码不落库）
 );
 CREATE INDEX idx_notes_folder_id ON notes(folder_id);
 
@@ -488,6 +513,7 @@ CREATE TABLE settings (
 ## 🔒 隐私说明
 
 - 所有记事内容、AI 对话历史、会议录音与转写、应用设置**仅存储于本地 SQLite 与本地磁盘**
+- 记事加密密码**绝不落库、不写日志**，数据库中仅保存 scrypt 盐与 AES-GCM 密文；密码丢失后密文不可恢复，请妥善牢记
 - AI 请求直接从渲染进程发往你配置的 Base URL（Ollama 本地或你自己的 API 端点）
 - 语音转写请求发往你配置的转写服务 Base URL（本地 whisper.cpp 或你自己的端点），音频文件不出本机
 - API Key 仅保存在本地，不会上传到任何服务器

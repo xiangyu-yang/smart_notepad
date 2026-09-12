@@ -31,6 +31,16 @@ export interface PromptOptions {
   cancelText?: string;
 }
 
+export interface PasswordPromptOptions {
+  title: string;
+  description?: string;
+  placeholder?: string;
+  confirmText?: string;
+  cancelText?: string;
+  /** 上一次尝试的错误提示（如"密码错误"），重新打开弹窗时内联展示 */
+  error?: string;
+}
+
 interface UiState {
   sidebarSearch: string;
   showAiPanel: boolean;
@@ -42,6 +52,9 @@ interface UiState {
   /** 文本输入对话框状态（替代 Electron 不支持的 window.prompt） */
   promptOptions: PromptOptions | null;
   promptResolver: ((value: string | null) => void) | null;
+  /** 密码输入对话框状态（type=password，值不做 trim，支持错误回显用于密码重试） */
+  passwordOptions: PasswordPromptOptions | null;
+  passwordResolver: ((value: string | null) => void) | null;
   /** 大模型思考过程开关：开 → 实时输出 reasoning；关 → 跳过思考直接出答案 */
   reasoningEnabled: boolean;
   /** AI 面板宽度（px），可拖动调整 */
@@ -70,6 +83,9 @@ interface UiState {
 
   openPrompt: (options: PromptOptions) => Promise<string | null>;
   closePrompt: (value: string | null) => void;
+
+  openPasswordPrompt: (options: PasswordPromptOptions) => Promise<string | null>;
+  closePasswordPrompt: (value: string | null) => void;
 }
 
 let toastSeq = 0;
@@ -83,6 +99,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   confirmResolver: null,
   promptOptions: null,
   promptResolver: null,
+  passwordOptions: null,
+  passwordResolver: null,
   reasoningEnabled: true, // 默认开启思考过程，让用户能看见模型"在想什么"
   aiPanelWidth: 380, // AI 面板默认宽度
   attachmentPreview: null,
@@ -140,6 +158,23 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({
       promptOptions: null,
       promptResolver: null
+    });
+    if (resolver) resolver(value);
+  },
+
+  openPasswordPrompt: (options) => {
+    return new Promise<string | null>((resolve) => {
+      set({
+        passwordOptions: options,
+        passwordResolver: resolve
+      });
+    });
+  },
+  closePasswordPrompt: (value) => {
+    const resolver = get().passwordResolver;
+    set({
+      passwordOptions: null,
+      passwordResolver: null
     });
     if (resolver) resolver(value);
   }

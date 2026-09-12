@@ -7,6 +7,7 @@ import NoteCard from './NoteCard';
 import FolderTree from './FolderTree';
 import ConfirmDialog from './ConfirmDialog';
 import PromptDialog from './PromptDialog';
+import PasswordDialog from './PasswordDialog';
 import ToastContainer from './Toast';
 import { AttachmentPreview } from './AttachmentPreview';
 import IconButton from './IconButton';
@@ -184,6 +185,7 @@ export default function Layout() {
       <ToastContainer />
       <ConfirmDialog />
       <PromptDialog />
+      <PasswordDialog />
       <AttachmentPreview />
     </div>
   );

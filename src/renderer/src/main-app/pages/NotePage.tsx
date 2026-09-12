@@ -13,6 +13,7 @@ import { useAttachmentStore } from '../stores/useAttachmentStore';
 import { useToast } from '../hooks/useToast';
 import IconButton from '../components/IconButton';
 import { AttachmentCard } from '../components/AttachmentCard';
+import LockedNoteView from '../components/LockedNoteView';
 import { formatShortDateTime } from '../utils/format-time';
 
 const AiPanel = lazy(() => import('../components/AiPanel'));
@@ -27,6 +28,14 @@ export default function NotePage() {
   const loadOne = useNoteStore((s) => s.loadOne);
   const saveNote = useNoteStore((s) => s.save);
   const setCurrentId = useNoteStore((s) => s.setCurrentId);
+
+  // 当前记事在全局 store 中的最新快照（加解密后由广播/action 即时更新）
+  const notes = useNoteStore((s) => s.notes);
+  const currentNote = useMemo(
+    () => (id ? notes.find((n) => n.id === id) ?? null : null),
+    [notes, id]
+  );
+  const isEncrypted = Boolean(currentNote?.is_encrypted);
 
   // --- 附件：状态 + 加载 ---
   const attachmentsById = useAttachmentStore((s) => s.byNoteId);
@@ -398,6 +407,12 @@ export default function NotePage() {
           resetEditor();
           return;
         }
+        if (note.is_encrypted) {
+          // 加密记事：密文绝不进入编辑器状态。
+          // 保持 lastLoadedIdRef = null，使解密成功后联动 effect 能加载明文。
+          resetEditor();
+          return;
+        }
         lastLoadedIdRef.current = id;
         editorLoad(note);
       } catch (e) {
@@ -415,6 +430,26 @@ export default function NotePage() {
     // Do NOT add editorDirty / editorTitle / editorContent here — see long comment above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, loadOne, editorLoad, resetEditor, toast, saveNote]);
+
+  /**
+   * 加解密状态联动（状态以 SQLite + 全局 store 中的 is_encrypted 为唯一真相，
+   * 重启后依然保持上次关闭时的加密/解密状态）：
+   *  - 进入加密态（打开密文记事 / 当前记事在卡片上被加密）→ 立即清空编辑器中的明文
+   *  - 转为明文态（卡片或锁定页解密成功）→ 把解密后的明文加载进编辑器一次
+   */
+  useEffect(() => {
+    if (!id || !currentNote) return;
+    if (currentNote.is_encrypted) {
+      const st = useEditorStore.getState();
+      if (st.loaded) resetEditor();
+      lastLoadedIdRef.current = null;
+    } else if (lastLoadedIdRef.current !== id) {
+      editorLoad(currentNote);
+      lastLoadedIdRef.current = id;
+      setLoading(false);
+      setNotFound(false);
+    }
+  }, [currentNote, id, editorLoad, resetEditor]);
 
   // Reset editor state ONLY on actual component unmount, not on id changes.
   // Resetting on id changes would wipe the pristine state of note A while
@@ -528,6 +563,11 @@ export default function NotePage() {
         </div>
       </div>
     );
+  }
+
+  // 加密记事：锁定页替代整个编辑器（含 AI/录音面板），密文绝不进入编辑区
+  if (isEncrypted && id) {
+    return <LockedNoteView noteId={id} />;
   }
 
   const showEditPane = viewMode === 'edit' || viewMode === 'split';
