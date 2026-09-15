@@ -13,6 +13,7 @@ import {
 } from './db/repositories/AttachmentRepository';
 import { WindowManager } from './window/WindowManager';
 import * as OllamaService from './services/OllamaService';
+import * as WhisperService from './services/WhisperService';
 import { encryptNote, decryptNote, NOTE_CRYPTO_ERRORS } from './utils/noteCrypto';
 import { AttachmentFileServer } from './services/AttachmentFileServer';
 import { KkFileViewService, KKFILEVIEW_DEFAULT_PORT } from './services/KkFileViewService';
@@ -667,6 +668,12 @@ export function registerIpcHandlers(): void {
   // 业务实现见 services/OllamaService.ts，IPC 层仅做薄路由
   ipcMain.handle(IPC_CHANNELS.OLLAMA_STATUS, () => OllamaService.getStatus());
   ipcMain.handle(IPC_CHANNELS.OLLAMA_START, () => OllamaService.start());
+
+  // ---------- Whisper-server (transcription) service management ----------
+  // 业务实现见 services/WhisperService.ts，IPC 层仅做薄路由
+  ipcMain.handle(IPC_CHANNELS.WHISPER_STATUS, () => WhisperService.getStatus());
+  ipcMain.handle(IPC_CHANNELS.WHISPER_START, () => WhisperService.start());
+  ipcMain.handle(IPC_CHANNELS.WHISPER_STOP, () => WhisperService.stop());
 
   // ---------- chat persistence ----------
   ipcMain.handle(IPC_CHANNELS.CHAT_LIST_SESSIONS, (_e, noteId: string) => {

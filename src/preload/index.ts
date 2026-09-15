@@ -80,6 +80,9 @@ const ipcApi: IpcApi = {
   'window.allowClose': () => invoke<void>(IPC_CHANNELS.WIN_ALLOW_CLOSE),
   'ollama.start': () => invoke<{ success: boolean; message: string }>(IPC_CHANNELS.OLLAMA_START),
   'ollama.status': () => invoke<{ running: boolean; message: string }>(IPC_CHANNELS.OLLAMA_STATUS),
+  'whisper.start': () => invoke<{ success: boolean; message: string }>(IPC_CHANNELS.WHISPER_START),
+  'whisper.stop': () => invoke<{ success: boolean; message: string }>(IPC_CHANNELS.WHISPER_STOP),
+  'whisper.status': () => invoke<{ running: boolean; message: string }>(IPC_CHANNELS.WHISPER_STATUS),
   'chat.listSessions': (noteId) =>
     invoke<{ sessions: ChatSession[]; activeSessionId: string | null }>(
       IPC_CHANNELS.CHAT_LIST_SESSIONS,

@@ -454,9 +454,17 @@ export default function NotePage() {
   // Reset editor state ONLY on actual component unmount, not on id changes.
   // Resetting on id changes would wipe the pristine state of note A while
   // the component is still mounted, making note→note auto-save unreliable.
+  //
+  // MUST also reset lastLoadedIdRef here. In React 18 StrictMode (dev), every
+  // effect runs setup → cleanup → setup. The cleanup below resets the editor
+  // store; if lastLoadedIdRef still holds the old id, the second setup pass
+  // sees `lastLoadedIdRef.current === id` and fast-returns, leaving the
+  // editor empty after the reset. Clearing the ref forces both fetchNote and
+  // the 加解密联动 effect to reload content on the re-mount pass.
   useEffect(() => {
     return () => {
       useEditorStore.getState().reset();
+      lastLoadedIdRef.current = null;
     };
   }, []);
 

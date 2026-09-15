@@ -17,6 +17,10 @@ export const IPC_CHANNELS = {
   // Ollama service management
   OLLAMA_START: 'ollama.start',
   OLLAMA_STATUS: 'ollama.status',
+  // Whisper-server (transcription) service management
+  WHISPER_START: 'whisper.start',
+  WHISPER_STOP: 'whisper.stop',
+  WHISPER_STATUS: 'whisper.status',
   // Chat persistence
   CHAT_LIST_SESSIONS: 'chat.listSessions',
   CHAT_UPSERT_SESSION: 'chat.upsertSession',

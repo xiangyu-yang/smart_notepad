@@ -188,6 +188,11 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState<TestResult>({ status: 'idle', message: '' });
   const [ollamaStarting, setOllamaStarting] = useState(false);
 
+  // whisper-server 转写服务管理
+  const [whisperStatus, setWhisperStatus] = useState<{ running: boolean; message: string } | null>(null);
+  const [whisperStarting, setWhisperStarting] = useState(false);
+  const [whisperStopping, setWhisperStopping] = useState(false);
+
   const isOllamaUrl = baseUrl.includes('localhost:11434') || baseUrl.includes('ollama');
 
   useEffect(() => {
@@ -339,6 +344,60 @@ export default function SettingsPage() {
       setTestResult({ status: 'error', message: `启动失败：${detail}` });
     } finally {
       setOllamaStarting(false);
+    }
+  };
+
+  // whisper-server 状态查询（进入设置页时自动检查一次）
+  const refreshWhisperStatus = useCallback(async () => {
+    try {
+      const result = await window.api['whisper.status']();
+      setWhisperStatus(result);
+    } catch {
+      setWhisperStatus({ running: false, message: '状态查询失败' });
+    }
+  }, []);
+
+  useEffect(() => {
+    if (storeLoaded) {
+      refreshWhisperStatus();
+    }
+  }, [storeLoaded, refreshWhisperStatus]);
+
+  const handleStartWhisper = async () => {
+    setWhisperStarting(true);
+    try {
+      const result = await window.api['whisper.start']();
+      if (result.success) {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message);
+      }
+      await refreshWhisperStatus();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      toast.error(`启动失败：${detail}`);
+      await refreshWhisperStatus();
+    } finally {
+      setWhisperStarting(false);
+    }
+  };
+
+  const handleStopWhisper = async () => {
+    setWhisperStopping(true);
+    try {
+      const result = await window.api['whisper.stop']();
+      if (result.success) {
+        toast.success(result.message);
+      } else {
+        toast.error(result.message);
+      }
+      await refreshWhisperStatus();
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      toast.error(`停止失败：${detail}`);
+      await refreshWhisperStatus();
+    } finally {
+      setWhisperStopping(false);
     }
   };
 
@@ -685,6 +744,63 @@ export default function SettingsPage() {
               />
               <div className="text-xs text-ink-300 mt-1.5 px-1">
                 填写语言代码（如 zh、en）可提高转写准确率，留空则自动检测
+              </div>
+            </div>
+
+            {/* 本地 whisper-server 服务管理 */}
+            <div className="pt-3 border-t border-paper-200/60">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-ink-700">
+                    本地 whisper-server
+                  </div>
+                  <div className="text-xs text-ink-400 mt-0.5">
+                    {whisperStatus
+                      ? whisperStatus.running
+                        ? `🟢 ${whisperStatus.message}（http://127.0.0.1:8000）`
+                        : `⚪ ${whisperStatus.message}`
+                      : '正在检查状态…'}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={handleStartWhisper}
+                    disabled={whisperStarting || whisperStopping || (whisperStatus?.running ?? false)}
+                    className={[
+                      'no-drag h-9 px-4 rounded-xl text-sm font-semibold flex items-center gap-1.5',
+                      'transition-all duration-150',
+                      whisperStarting || whisperStopping || (whisperStatus?.running ?? false)
+                        ? 'bg-paper-200 text-ink-300 cursor-not-allowed'
+                        : 'bg-sage-600 text-white shadow-card hover:bg-sage-700 hover:scale-[1.02] active:scale-[0.99]'
+                    ].join(' ')}
+                  >
+                    {whisperStarting ? (
+                      <>⏳ 启动中…</>
+                    ) : (
+                      <>🚀 启动服务</>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleStopWhisper}
+                    disabled={whisperStarting || whisperStopping || !(whisperStatus?.running ?? false)}
+                    className={[
+                      'no-drag h-9 px-4 rounded-xl text-sm font-semibold flex items-center gap-1.5',
+                      'transition-all duration-150',
+                      whisperStarting || whisperStopping || !(whisperStatus?.running ?? false)
+                        ? 'bg-paper-200 text-ink-300 cursor-not-allowed'
+                        : 'bg-rose-100 text-rose-600 hover:bg-rose-200 hover:scale-[1.02] active:scale-[0.99]'
+                    ].join(' ')}
+                  >
+                    {whisperStopping ? (
+                      <>⏳ 停止中…</>
+                    ) : (
+                      <>🛑 停止服务</>
+                    )}
+                  </button>
+                </div>
+              </div>
+              <div className="text-xs text-ink-300 mt-2.5 px-1">
+                本地 whisper.cpp 转写服务（端口 8000）。需先安装 <code className="font-mono text-ink-400">brew install whisper-cpp</code> 并下载模型到 <code className="font-mono text-ink-400">~/Documents/whisper-models/</code>。启动后可将上方 Base URL 设为 <code className="font-mono text-ink-400">http://localhost:8000/v1</code>
               </div>
             </div>
           </div>

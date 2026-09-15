@@ -210,6 +210,10 @@ export interface IpcApi {
   // ollama
   'ollama.start': () => Promise<{ success: boolean; message: string }>;
   'ollama.status': () => Promise<{ running: boolean; message: string }>;
+  // whisper-server (transcription service)
+  'whisper.start': () => Promise<{ success: boolean; message: string }>;
+  'whisper.stop': () => Promise<{ success: boolean; message: string }>;
+  'whisper.status': () => Promise<{ running: boolean; message: string }>;
 }
 
 export interface WindowApi {

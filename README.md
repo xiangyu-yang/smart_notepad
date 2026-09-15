@@ -134,6 +134,7 @@
 - **Mac GPU 加速**：原生 whisper.cpp 利用 Metal + Apple Neural Engine 加速转写，large-v3 模型可达 10× 实时速度
 - **会议录音面板**：录音控制（开始/暂停/恢复/停止）、实时计时器、自动转写、历史列表（按时间降序）、卡片式展开、双击编辑标题与转写文本、一键插入到编辑器、删除录音（同步清理磁盘文件）
 - **快速语音输入**：AI 面板发送按钮旁的 🎤 图标，录音中变红脉冲，停止后自动转写填入对话框，可编辑后发送到 AI 对话
+- **whisper-server 服务管理**：设置页「会议录音转写」区内置 🚀 启动 / 🛑 停止 按钮，进入页面自动探测服务状态（🟢/⚪ 指示灯）；启动时自动检测 whisper-server 命令与模型文件（优先 large-v3 → medium → 任意 ggml-*.bin），spawn 子进程并轮询等待就绪；停止优先 kill 本服务进程，外部启动的进程回退 lsof 按端口查杀
 
 ### 🛡️ 数据安全
 
@@ -185,6 +186,7 @@ smart_notepad/
 │   │   │       └── SettingsRepository.ts
 │   │   ├── services/
 │   │   │   ├── OllamaService.ts        # Ollama 健康检查 + 启动
+│   │   │   ├── WhisperService.ts       # whisper-server 生命周期管理（启动/停止/状态探测）
 │   │   │   ├── KkFileViewService.ts   # kkFileView 容器生命周期 + trust 配置修补
 │   │   │   └── AttachmentFileServer.ts # 本地 HTTP 文件服务（供 kkFileView 拉取附件）
 │   │   └── utils/
@@ -326,6 +328,7 @@ pnpm run build:mac
    - **API Key**：留空（本地服务无需鉴权）
    - **模型名称**：`whisper-1`
    - **语言**：`zh`
+   - 也可直接在设置页点击 **🚀 启动服务** 按钮一键拉起 whisper-server（自动检测命令与模型文件），无需手动在终端运行
 
 > 一键启动脚本 `启动智能记事本.command` 已自动按顺序拉起 whisper-server 与 Vite + Electron。
 
